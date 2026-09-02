@@ -1,0 +1,2 @@
+plugin_count=6 probe_absent=true parses=true
+keys=$schema,plugin,provider
