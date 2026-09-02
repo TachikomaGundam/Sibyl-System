@@ -1,0 +1,12 @@
+{
+  "name": "magi-spike-probe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./server.js"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  }
+}
