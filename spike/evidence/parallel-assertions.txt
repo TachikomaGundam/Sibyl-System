@@ -1,0 +1,22 @@
+53:timestamp=2026-09-01T19:29:25.819Z level=INFO run=c4fc2c2f message="exiting loop" session.id=ses_fa18d67e4ffetzzNX1S8tRaS8N
+57:timestamp=2026-09-01T19:29:27.336Z level=INFO run=c4fc2c2f message="exiting loop" session.id=ses_fa18d67dfffew71FEqGExxObZP
+58:[0m⚙ [0mmagi_probe {"subject":"council-m0","mode":"parallel"}
+68:  "ok": true,
+69:  "mode": "parallel",
+72:  "totalLatencyMs": 3859,
+75:      "marker": "M0-councilm0-50guhi",
+76:      "sessionID": "ses_fa18d67e4ffetzzNX1S8tRaS8N",
+77:      "ok": true,
+78:      "childText": "PROBE-OK M0-councilm0-50guhi",
+79:      "latencyMs": 2346,
+80:      "modelApplied": "acme-provider/acme-model-a",
+83:      "markerEchoed": true
+86:      "marker": "M1-councilm0-ks888y",
+87:      "sessionID": "ses_fa18d67dfffew71FEqGExxObZP",
+88:      "ok": true,
+89:      "childText": "PROBE-OK M1-councilm0-ks888y",
+90:      "latencyMs": 3858,
+91:      "modelApplied": "acme-provider/acme-model-a",
+94:      "markerEchoed": true
+101:timestamp=2026-09-01T19:29:32.945Z level=INFO run=c4fc2c2f message="exiting loop" session.id=ses_fa18d80d2ffeJ64Y91z5mKDjwA
+102:timestamp=2026-09-01T19:29:33.036Z level=INFO run=c4fc2c2f message="disposing instance" directory=<WORKSPACE>/workspace/harness/magi/spike

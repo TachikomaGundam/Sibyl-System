@@ -1,0 +1,14 @@
+43:timestamp=2026-09-01T19:30:17.900Z level=INFO run=c5aa08c5 message="exiting loop" session.id=ses_fa18c9e42ffeAwQTK2HD30hw21
+44:[0m⚙ [0mmagi_probe {"mode":"single","subject":"solo-m0"}
+54:  "ok": true,
+55:  "mode": "single",
+58:  "totalLatencyMs": 2809,
+61:      "marker": "M0-solom0-mm8m7s",
+62:      "sessionID": "ses_fa18c9e42ffeAwQTK2HD30hw21",
+63:      "ok": true,
+64:      "childText": "PROBE-OK M0-solom0-mm8m7s",
+65:      "latencyMs": 2807,
+66:      "modelApplied": "acme-provider/acme-model-a",
+69:      "markerEchoed": true
+76:timestamp=2026-09-01T19:30:22.209Z level=INFO run=c5aa08c5 message="exiting loop" session.id=ses_fa18cb7deffexDFXDYXrOPyRsH
+77:timestamp=2026-09-01T19:30:22.228Z level=INFO run=c5aa08c5 message="disposing instance" directory=<WORKSPACE>/workspace/harness/magi/spike
