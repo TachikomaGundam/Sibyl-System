@@ -89,6 +89,12 @@ Plainly stated:
   0-confidence REJECT ballot with reason `verdict-unparseable: …`.
 - There is no lenient mode, by design.
 
+## Security notes
+
+- Consult/swarm send the artifact text to your configured model pool providers.
+- The plugin writes only under its state paths: the runs file and the per-run space.
+- Voter/worker turns run with `bash`, `edit`, and `write` disabled per prompt.
+
 ## Architecture (`src/`)
 
 Dependencies point downward only:
@@ -146,7 +152,7 @@ Shared inspiration is Evangelion's MAGI trinity; implementations are unrelated.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run test        # 252 unit tests, fully offline (no network, no LLM)
+npm run test        # 255 unit tests, fully offline (no network, no LLM)
 npm run build       # esbuild bundle → dist/index.js (ESM)
 node smoke/run-smoke.mjs   # offline smoke of the shipped surface (see smoke/README.md)
 ```

@@ -312,3 +312,30 @@ test("save: rename failing EBUSY twice -> rethrows and leaves no tmp residue", a
   assert.equal(await stat(runsFile).then(() => false, () => true), true, "target not created");
   assert.deepEqual((await readdir(dir)).filter((n) => n.endsWith(".tmp")), [], "no tmp residue");
 });
+
+test("audit F2: load rebuilds verdict as a fresh exact-5-field copy; junk + __proto__ keys are not laundered back on save", async (t) => {
+  const dir = await tmp("verdict-copy");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runsFile = join(dir, "runs.json");
+  // Raw JSON text (NOT an object literal): JSON.parse materialises
+  // "__proto__" as an OWN data property, which is the hostile shape under test.
+  await writeFile(
+    runsFile,
+    '[{"runId":"poison-1","kind":"consult","artifact":"a.md","status":"done",' +
+      '"spaceDir":"/spaces/poison-1","createdAt":"2026-08-01T00:00:00.000Z",' +
+      '"updatedAt":"2026-08-01T00:00:00.000Z",' +
+      '"verdict":{"verdict":"APPROVE","approvals":2,"rejects":1,"errors":0,"missing":0,' +
+      '"junk":"launder-me","__proto__":{"polluted":true}}}]',
+    "utf8",
+  );
+  const loaded = await new RunStore({ runsFile }).load();
+  const record = loaded[0];
+  assert.ok(record !== undefined && record.verdict !== undefined);
+  assert.deepEqual(record.verdict, { verdict: "APPROVE", approvals: 2, rejects: 1, errors: 0, missing: 0 });
+  assert.deepEqual(Object.keys(record.verdict).sort(), ["approvals", "errors", "missing", "rejects", "verdict"]);
+  assert.equal(Object.prototype.hasOwnProperty.call(Object.prototype, "polluted"), false, "no global prototype pollution");
+  await new RunStore({ runsFile }).appendOrUpdate(record);
+  const raw = await readFile(runsFile, "utf8");
+  assert.equal(raw.includes("junk"), false, "save must not write the junk key back");
+  assert.equal(raw.includes("polluted"), false, "save must not write the __proto__ payload back");
+});

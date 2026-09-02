@@ -129,7 +129,7 @@ test("runInSession: happy follow-up joins text parts and reports the model", asy
   assert.equal(r.modelApplied, "p/m");
   assert.equal(seen[0]?.id, "sess-9");
   assert.equal(seen[0]?.text, "repair now");
-  assert.deepEqual(seen[0]?.tools, {});
+  assert.deepEqual(seen[0]?.tools, { bash: false, edit: false, write: false });
 });
 
 test("runInSession: client throw and info.error collapse to ok:false, never reject", async () => {

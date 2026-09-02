@@ -137,7 +137,16 @@ export function validateEntry(raw: unknown): EntryVerdict {
   const verdict = field(raw, "verdict");
   if (verdict !== undefined) {
     if (!isVerdictLike(verdict)) return { ok: false, reason: "verdict must be a RunVerdict when present" };
-    record.verdict = verdict;
+    // Audit F2: rebuild a fresh exact-5-field object instead of aliasing the
+    // parsed JSON — extra own keys (incl. a data-property "__proto__") must
+    // not survive into the in-memory record or get laundered back by save().
+    record.verdict = {
+      verdict: verdict.verdict,
+      approvals: verdict.approvals,
+      rejects: verdict.rejects,
+      errors: verdict.errors,
+      missing: verdict.missing,
+    };
   }
   const rounds = field(raw, "rounds");
   if (rounds !== undefined) {
