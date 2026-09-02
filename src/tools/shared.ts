@@ -12,6 +12,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
+import { DEFAULT_DISALLOWED_TOOLS } from "../engine/index.ts";
 import type { EngineClient, PersonaRunResult } from "../engine/index.ts";
 import type { ModelSlot } from "../swarm/types.ts";
 import type { RunRecord, RunStore } from "../state/index.ts";
@@ -159,6 +160,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
  * consult repair path (JSON-only retry in the voter's own session) and the
  * swarm judge. Never throws — timeouts and client-level failures collapse to
  * an ok:false PersonaRunResult with an "exception" stage.
+ *
+ * Audit F1: a follow-up turn runs with the SAME tool-gate as the engine's
+ * first turn — every disallowed tool name mapped to false in body.tools
+ * (default: the engine's ["bash","edit","write"] set), never an empty map.
  */
 export async function runInSession(
   client: EngineClient,
@@ -167,6 +172,7 @@ export async function runInSession(
   model: ModelSlot,
   text: string,
   timeoutMs: number,
+  disallowedTools: readonly string[] = DEFAULT_DISALLOWED_TOOLS,
 ): Promise<PersonaRunResult> {
   const t0 = Date.now();
   const fail = (error: string): PersonaRunResult => ({
@@ -179,10 +185,13 @@ export async function runInSession(
     error,
   });
   try {
+    const tools: Record<string, boolean> = Object.fromEntries(
+      disallowedTools.map((name) => [name, false]),
+    );
     const prompted = await withTimeout(
       client.session.prompt({
         path: { id: sessionID },
-        body: { model, tools: {}, parts: [{ type: "text", text }] },
+        body: { model, tools, parts: [{ type: "text", text }] },
         query: { directory },
       }),
       timeoutMs,

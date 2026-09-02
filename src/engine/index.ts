@@ -92,7 +92,10 @@ export type RunPersonaOptions = {
 };
 
 const DEFAULT_TIMEOUT_MS = 240_000;
-const DEFAULT_DISALLOWED_TOOLS = ["bash", "edit", "write"];
+/** Single source of truth for the voter/worker tool-gate (audit F1): every
+ * name mapped to false in a prompt body's `tools` — exported so the tools
+ * layer's follow-up turns (runInSession) apply the identical gate. */
+export const DEFAULT_DISALLOWED_TOOLS = ["bash", "edit", "write"];
 
 /**
  * Promise.race guard with the timer cleared in finally (probe server.js:23-31).
