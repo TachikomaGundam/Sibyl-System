@@ -156,6 +156,41 @@ test("duplicate task id and extra top-level key: both rejected", async () => {
   assert.ok(extra.ok === false && extra.error.includes('unknown top-level key "budget"'));
 });
 
+const cappedTask = (index: number, over: Partial<{ id: string; title: string; instructions: string }> = {}) => ({
+  id: over.id ?? `t${index}`,
+  title: over.title ?? `task ${index}`,
+  instructions: over.instructions ?? `do step ${index}`,
+  dependsOn: [] as string[],
+});
+const cappedSchema = (count: number) => ({
+  tasks: Array.from({ length: count }, (_, i) => cappedTask(i)),
+  concurrency: 4,
+});
+
+test("audit F3 caps: 65 tasks rejected naming cap 64; exactly 64 accepted", () => {
+  const tooMany = validateWorkflowSchema(cappedSchema(65));
+  assert.equal(tooMany.ok, false);
+  assert.ok(tooMany.ok === false && tooMany.error.includes("at most 64"));
+  const atCap = validateWorkflowSchema(cappedSchema(64));
+  assert.equal(atCap.ok, true);
+});
+
+test("audit F3 caps: oversized id/title/instructions rejected, each error names its cap", () => {
+  const longId = validateWorkflowSchema({ tasks: [cappedTask(0, { id: "x".repeat(65) })], concurrency: 1 });
+  assert.equal(longId.ok, false);
+  assert.ok(longId.ok === false && longId.error.includes("tasks[0].id"));
+  assert.ok(longId.ok === false && longId.error.includes("at most 64"));
+  const longTitle = validateWorkflowSchema({ tasks: [cappedTask(0, { title: "t".repeat(201) })], concurrency: 1 });
+  assert.equal(longTitle.ok, false);
+  assert.ok(longTitle.ok === false && longTitle.error.includes("at most 200"));
+  const longInstr = validateWorkflowSchema({ tasks: [cappedTask(0, { instructions: "i".repeat(8193) })], concurrency: 1 });
+  assert.equal(longInstr.ok, false);
+  assert.ok(longInstr.ok === false && longInstr.error.includes("instructions"));
+  assert.ok(longInstr.ok === false && longInstr.error.includes("at most 8192"));
+  const atCap = validateWorkflowSchema({ tasks: [cappedTask(0, { id: "x".repeat(64), title: "t".repeat(200), instructions: "i".repeat(8192) })], concurrency: 1 });
+  assert.equal(atCap.ok, true);
+});
+
 test("architect persona failure (create error): structured plan error, no throw", async () => {
   const { client } = scriptedClient({ create: () => ({ error: { message: "create boom" } }) });
   let result;

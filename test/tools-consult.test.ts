@@ -39,12 +39,21 @@ const CAS_REJECT = verdict("REJECT", 0.7, "casper: low utility", ["justify compl
 
 type Step = { text?: string; error?: unknown };
 
+/** One captured prompt body (audit F1: the repair turn's tool-gate map is
+ * asserted through this record, alongside the pre-existing id/text/model). */
+type PromptRecord = {
+  id: string;
+  text: string;
+  model: { providerID: string; modelID: string };
+  tools: Record<string, boolean>;
+};
+
 /** Scripted client: create yields DISTINCT sequential session ids; prompts are
  * served from a per-session queue (voters fan out in COUNCILORS order, so
  * sess-1=MELCHIOR, sess-2=BALTHASAR, sess-3=CASPER). */
 function councilClient(script: Record<string, Step[]>) {
   let created = 0;
-  const prompts: { id: string; text: string; model: { providerID: string; modelID: string } }[] = [];
+  const prompts: PromptRecord[] = [];
   const client: EngineClient = {
     session: {
       async create() {
@@ -52,7 +61,12 @@ function councilClient(script: Record<string, Step[]>) {
         return { data: { id: `sess-${String(created)}` } };
       },
       async prompt(args) {
-        prompts.push({ id: args.path.id, text: args.body.parts[0]?.text ?? "", model: args.body.model });
+        prompts.push({
+          id: args.path.id,
+          text: args.body.parts[0]?.text ?? "",
+          model: args.body.model,
+          tools: args.body.tools,
+        });
         const next = script[args.path.id]?.shift();
         if (next === undefined) {
           return { data: { info: { providerID: "p", modelID: "m" }, parts: [{ type: "text", text: "" }] } };
@@ -72,7 +86,7 @@ function councilClient(script: Record<string, Step[]>) {
   return { client, prompts };
 }
 
-async function fixture(overScript: Record<string, Step[]>, opts?: unknown): Promise<{ deps: ToolDeps; dir: string; prompts: { id: string; text: string; model: { providerID: string; modelID: string } }[] }> {
+async function fixture(overScript: Record<string, Step[]>, opts?: unknown): Promise<{ deps: ToolDeps; dir: string; prompts: PromptRecord[] }> {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-consult-"));
   const { client, prompts } = councilClient(overScript);
   const deps: ToolDeps = {
@@ -138,6 +152,9 @@ test("consult repair: unparseable voter gets ONE in-session JSON-only follow-up"
   assert.equal(repair.id, "sess-2"); // follow-up goes to THAT voter's own session
   assert.ok(repair.text.includes("not a valid verdict JSON"), repair.text);
   assert.ok(repair.text.includes('"verdict":"APPROVE"|"REJECT"'), repair.text);
+  // audit F1: the repair turn runs IN THE VOTER'S SESSION and must carry the
+  // same bash/edit/write gate the engine applies to first-turn ballots.
+  assert.deepEqual(repair.tools, { bash: false, edit: false, write: false });
 });
 
 test("consult repair failure: second garbage reply falls through to fail-closed unparseable REJECT", async () => {

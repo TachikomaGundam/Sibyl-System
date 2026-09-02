@@ -48,6 +48,13 @@ export function buildPlanInstruction(goal: string, artifact: string): string {
 const SCHEMA_KEYS = ["tasks", "concurrency", "notes"] as const;
 const TASK_KEYS = ["id", "title", "instructions", "dependsOn"] as const;
 
+// Audit F3: architect output is untrusted — bound its size so a hostile or
+// runaway plan cannot exhaust memory/dispatch before the fail-closed verdict.
+const MAX_PLAN_TASKS = 64;
+const MAX_TASK_ID_CHARS = 64;
+const MAX_TASK_TITLE_CHARS = 200;
+const MAX_TASK_INSTRUCTIONS_CHARS = 8192;
+
 function describeValue(v: unknown): string {
   if (v === null) return "null";
   if (Array.isArray(v)) return `array(${v.length})`;
@@ -89,6 +96,9 @@ export function validateWorkflowSchema(raw: unknown): { ok: true; value: Workflo
   if (!Array.isArray(root.tasks) || root.tasks.length === 0) {
     return { ok: false, error: `tasks must be a non-empty array, got ${describeValue(root.tasks)}` };
   }
+  if (root.tasks.length > MAX_PLAN_TASKS) {
+    return { ok: false, error: `tasks must contain at most ${MAX_PLAN_TASKS} entries, got ${root.tasks.length}` };
+  }
   const seen = new Set<string>();
   const tasks: WorkflowTask[] = [];
   for (const [index, entry] of root.tasks.entries()) {
@@ -109,11 +119,20 @@ export function validateWorkflowSchema(raw: unknown): { ok: true; value: Workflo
       return { ok: false, error: `duplicate task id "${id}"` };
     }
     seen.add(id);
+    if (id.length > MAX_TASK_ID_CHARS) {
+      return { ok: false, error: `tasks[${index}].id must be at most ${MAX_TASK_ID_CHARS} chars, got ${id.length}` };
+    }
     if (typeof title !== "string") {
       return { ok: false, error: `tasks[${index}].title must be a string, got ${describeValue(title)}` };
     }
+    if (title.length > MAX_TASK_TITLE_CHARS) {
+      return { ok: false, error: `tasks[${index}].title must be at most ${MAX_TASK_TITLE_CHARS} chars, got ${title.length}` };
+    }
     if (typeof instructions !== "string" || instructions.length === 0) {
       return { ok: false, error: `tasks[${index}].instructions must be a non-empty string, got ${describeValue(instructions)}` };
+    }
+    if (instructions.length > MAX_TASK_INSTRUCTIONS_CHARS) {
+      return { ok: false, error: `tasks[${index}].instructions must be at most ${MAX_TASK_INSTRUCTIONS_CHARS} chars, got ${instructions.length}` };
     }
     if (!Array.isArray(dependsOn)) {
       return { ok: false, error: `tasks[${index}].dependsOn must be an array, got ${describeValue(dependsOn)}` };
