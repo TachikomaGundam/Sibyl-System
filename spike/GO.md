@@ -101,7 +101,7 @@ async function runPersona(
 1. **Silent plugin load failure on bare-import resolution.** A path-registered plugin's
    `import { tool } from "@opencode-ai/plugin"` is resolved by Node/Bun upward from the
    **plugin file's directory** (`<WORKSPACE>/.../probe-plugin/node_modules` → ... → `<HOME>/node_modules`),
-   NOT from opencode's bundle. a local model-routing plugin works only because `~/.config/opencode/node_modules/@opencode-ai/plugin`
+   NOT from opencode's bundle. A local model-routing plugin works only because `~/.config/opencode/node_modules/@opencode-ai/plugin`
    sits above it. Our magi/spike dir had no such ancestor → **zero error lines in logs at any
    level; tool simply absent from the model's toolset**. Fix used (no-install, read-only reuse):
    symlink `swarm/node_modules/@opencode-ai/{plugin,sdk}` + `.config/opencode/node_modules/zod`
