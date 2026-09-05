@@ -1,14 +1,38 @@
 {
   "name": "sibyl-system",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0",
   "license": "MIT",
   "type": "module",
   "description": "Sibyl-System: fail-closed 2/3 council voting + dynamic swarm plugin for OpenCode",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "llm",
+    "council",
+    "code-review",
+    "verdict",
+    "swarm"
+  ],
+  "homepage": "https://github.com/TachikomaGundam/Sibyl-System",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/TachikomaGundam/Sibyl-System.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TachikomaGundam/Sibyl-System/issues"
+  },
+  "main": "dist/index.js",
+  "exports": "./dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js",
-    "test": "node --import ./tools/register-ts.mjs --test test/*.test.ts"
+    "test": "node --import ./tools/register-ts.mjs --test test/*.test.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@opencode-ai/plugin": "1.15.13",
