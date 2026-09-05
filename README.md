@@ -176,3 +176,7 @@ fail-closed deliberation network that renders verdicts — a fitting namesake fo
 voting council. The councilor names **Melchior / Balthasar / Casper** are retained
 as an Evangelion MAGI tribute to the original three-voter design. The project was
 developed under the name MAGI and renamed to Sibyl-System before its first release.
+
+## License
+
+MIT
