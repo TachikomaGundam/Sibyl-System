@@ -2,6 +2,7 @@
   "name": "sibyl-system",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Sibyl-System: fail-closed 2/3 council voting + dynamic swarm plugin for OpenCode",
   "scripts": {
