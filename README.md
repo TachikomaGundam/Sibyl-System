@@ -1,5 +1,7 @@
 # Sibyl-System
 
+[![npm version](https://img.shields.io/npm/v/sibyl-system.svg)](https://www.npmjs.com/package/sibyl-system) ![license MIT](https://img.shields.io/badge/license-MIT-green.svg)
+
 A standalone [opencode](https://opencode.ai) plugin with two capabilities:
 
 - **`sibyl_consult`** — a three-voter review council (MELCHIOR / BALTHASAR / CASPER)
@@ -13,7 +15,16 @@ cross-agent message bus. Everything runs through plain opencode child sessions.
 
 ## Install
 
-One registration line in `~/.config/opencode/opencode.jsonc`
+Register the published npm package by name (opencode resolves it from npm):
+
+```jsonc
+{
+  "plugin": ["sibyl-system"]
+}
+```
+
+Alternatively, register a local checkout by path. One registration line in
+`~/.config/opencode/opencode.jsonc`
 (Windows: `%USERPROFILE%\.config\opencode\opencode.jsonc`). This is a
 **documented example only** — the plugin never edits your config:
 
