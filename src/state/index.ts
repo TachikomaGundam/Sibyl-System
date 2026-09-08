@@ -1,7 +1,11 @@
 // provenance: original clean-room Sibyl-System implementation (T5 state layer),
 // no external code copied. Design follows the internal Sibyl-System plan §5 and
-// learnings.md #4 (default path must land in <pkg>/.state/sibyl/, cwd- and
-// seam-independent) and the swarm-era crash lesson (load() NEVER throws;
+// learnings.md #4 as amended for npm distribution: an npm-installed plugin must
+// NOT keep state inside its versioned package/cache dir (every upgrade ships a
+// fresh directory and wipes history), so the default runs file lives in the
+// stable user-home state root ~/.sibyl/ — the same root family as the space
+// root (~/.sibyl/runs.json beside ~/.sibyl/spaces/), cwd- and seam-independent.
+// Plus the swarm-era crash lesson (load() NEVER throws;
 // malformed entries are dropped element-by-element, never fatal).
 //
 // Durable run store: atomic writes (tmp+rename in the same dir),
@@ -9,11 +13,9 @@
 // workspace dirs under <spaceRoot>/<runId>/.
 
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   byCreatedAt,
@@ -49,24 +51,7 @@ export {
   type VerdictTag,
 };
 
-/**
- * Nearest package.json walking up from `startDir` (module file location),
- * so the default holds identically for `src/state/index.ts` imports and the
- * esbuild bundle shipped under `dist/`, and is independent of cwd.
- * Falls back to cwd only if no package.json exists up to the fs root.
- */
-function findPackageRoot(startDir: string): string {
-  let dir = startDir;
-  for (;;) {
-    if (existsSync(join(dir, "package.json"))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) return process.cwd();
-    dir = parent;
-  }
-}
-
-export const PACKAGE_ROOT: string = findPackageRoot(dirname(fileURLToPath(import.meta.url)));
-export const DEFAULT_RUNS_FILE: string = join(PACKAGE_ROOT, ".state", "sibyl", "runs.json");
+export const DEFAULT_RUNS_FILE: string = join(homedir(), ".sibyl", "runs.json");
 export const DEFAULT_SPACE_ROOT: string = join(homedir(), ".sibyl", "spaces");
 
 function errCode(err: unknown): unknown {

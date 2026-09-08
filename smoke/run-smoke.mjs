@@ -3,7 +3,7 @@
 // network, no config writes: exercises only the SHIPPED surface of the built
 // bundle (import -> factory -> tool registry -> sibyl_status). The run store is
 // isolated via SIBYL_STATE_FILE into a throwaway /tmp sandbox that is always
-// removed; the real <repo>/.state and ~/.sibyl are never touched (no createRun,
+// removed; your real ~/.sibyl store is never touched (no createRun,
 // sibyl_status only reads).
 //
 // Usage: npm run build && node smoke/run-smoke.mjs
