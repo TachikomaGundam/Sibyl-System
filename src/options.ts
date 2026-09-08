@@ -58,7 +58,13 @@ export const swarmSlotsSchema = z
   .prefault({});
 export type SwarmSlots = z.infer<typeof swarmSlotsSchema>;
 
-export const pluginOptionsSchema = z.object({
+// Top level is STRICT on purpose: the host passes the registration tuple's second
+// element VERBATIM as this object (SDK `Plugin = (input, options?: PluginOptions)`),
+// so option fields live at the TOP LEVEL. A nested `{ options: {...} }` wrapper or a
+// typo'd key must fail LOUD (ok:false -> DISABLED banner naming the key), never be
+// silently ignored and run on defaults.
+export const pluginOptionsSchema = z
+  .object({
   /** voter model slot per councilor (each defaults to "default") */
   voters: voterSlotsSchema,
   /** judge/pro/con model slots for the swarm layer (each defaults to "default") */
@@ -76,7 +82,8 @@ export const pluginOptionsSchema = z.object({
    * the same shared object reference and a caller mutation would poison all
    * later parses (proved: .omo/evidence/t6/zod-probe3.mjs). */
   modelPool: modelPoolSchema.prefault(DEFAULT_POOL),
-});
+})
+  .strict();
 export type PluginOptions = z.infer<typeof pluginOptionsSchema>;
 
 /** Result union - ok:false carries human-readable, field-pathed messages. */

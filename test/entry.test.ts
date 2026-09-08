@@ -87,6 +87,36 @@ test("entry: invalid config disables LOUDLY (console.error per issue + DISABLED)
   assert.ok(lines.some((l) => l.includes("SIBYL plugin DISABLED")), lines.join("\n"));
 });
 
+// Host convention (SDK `Plugin = (input, options?: PluginOptions)`): the tuple's second
+// element arrives VERBATIM as the factory's options object, so option fields are top-level
+// and a nested {options:{...}} wrapper is a config bug the strict schema must reject LOUD.
+test("entry: wrapper-form {options:{modelPool:...}} disables LOUDLY with zero tools", async () => {
+  const { sdk } = fakeSdkClient({});
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  let hooks: Awaited<ReturnType<typeof SibylPlugin>>;
+  try {
+    hooks = await SibylPlugin(fakeInput(sdk), {
+      options: { modelPool: { default: { providerID: "anthropic", modelID: "claude-x" } } },
+    });
+  } finally {
+    console.error = real;
+  }
+  assert.deepEqual(hooks, {}, "wrapper form must register no tools");
+  assert.ok(lines.some((l) => l.includes("options")), lines.join("\n"));
+  assert.ok(lines.some((l) => l.includes("SIBYL plugin DISABLED")), lines.join("\n"));
+});
+
+test("entry: direct top-level options reach the schema (maxRounds:2 registers the three tools)", async () => {
+  const { sdk } = fakeSdkClient({});
+  const hooks = await SibylPlugin(fakeInput(sdk), { maxRounds: 2 });
+  const names = Object.keys(hooks.tool ?? {}).sort();
+  assert.deepEqual(names, ["sibyl_consult", "sibyl_status", "sibyl_swarm"]);
+});
+
 test("entry: SIBYL_STATE_FILE seam reaches the store used by the registered tools", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-entry-"));
   const stateFile = join(dir, "runs.json");
