@@ -85,8 +85,13 @@ defaults.
 
 ## State layout
 
-- **Runs file**: `<repo>/.state/sibyl/runs.json` — one record per run (id, kind,
-  status, verdict tally, operator notes). Written atomically (tmp + rename).
+- **Runs file**: `~/.sibyl/runs.json` (Windows: `%USERPROFILE%\.sibyl\runs.json`) —
+  one record per run (id, kind, status, verdict tally, operator notes), co-located
+  with `spaces/` under the one `~/.sibyl` state root, so npm upgrades (which ship a
+  fresh, versioned package directory) never wipe your run history. Written
+  atomically (tmp + rename; the parent directory is created on demand).
+  *Note: 1.0.x-era runs recorded under the old package-local `<repo>/.state` path
+  are not migrated (pre-adoption by design) — the store starts empty.*
 - **Per-run space**: `~/.sibyl/spaces/<runId>/` (Windows: `%USERPROFILE%\.sibyl\spaces`) — full voter replies
   (`MELCHIOR.md`, …) for consults, worker drafts (`<workerId>.draft.md`) for swarms.
 - **Test seam**: `SIBYL_STATE_FILE` env var overrides the runs-file path.
@@ -147,7 +152,7 @@ PLAN→MINT→DISPATCH→AGGREGATE pipeline over ordinary child sessions.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run test        # 255 unit tests, fully offline (no network, no LLM)
+npm run test        # 259 unit tests, fully offline (no network, no LLM)
 npm run build       # esbuild bundle → dist/index.js (ESM)
 node smoke/run-smoke.mjs   # offline smoke of the shipped surface (see smoke/README.md)
 ```

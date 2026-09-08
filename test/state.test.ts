@@ -3,9 +3,9 @@
 // entries dropped with warnings, never fatal — swarm crash lesson), corrupt
 // whole-file recovery, atomic concurrent appendOrUpdate (no torn JSON, no
 // lost updates), createRun spaces, and the MANDATORY default-path assertion
-// (learnings.md #4: NO env seam — the resolved path must literally be
-// <repo>/.state/sibyl/runs.json, proven with a real write and byte-exact
-// restore). All record assertions read the file back via a FRESH store
+// (NO env seam — the resolved path must literally be ~/.sibyl/runs.json, the
+// user-home state root shared with the space root, proven with a real write
+// and byte-exact restore). All record assertions read the file back via a FRESH store
 // instance (misleading-success guard), never in-memory state.
 
 import { test } from "node:test";
@@ -13,21 +13,15 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import {
   DEFAULT_RUNS_FILE,
   DEFAULT_SPACE_ROOT,
   SIBYL_STATE_FILE_ENV,
-  PACKAGE_ROOT,
   RunStore,
   type RunRecord,
 } from "../src/state/index.ts";
-
-// Repo root derived from this file (test/ lives one level under it), so the
-// default-path assertions hold on any checkout, not just the author machine.
-const SIBYL = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
@@ -69,6 +63,17 @@ test("roundtrip: appendOrUpdate persists; a fresh store loads byte-truth records
   await store.appendOrUpdate(updated);
   const loaded2 = await new RunStore({ runsFile, spaceRoot: dir }).load();
   assert.deepEqual(loaded2, [updated, late]);
+});
+
+test("save: a missing multi-level runs-file parent is created recursively", async (t) => {
+  const dir = await tmp("mkparent");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runsFile = join(dir, "deep", "nested", "runs.json");
+  const store = new RunStore({ runsFile });
+  const r = rec("mk-parent", "2026-08-01T00:00:00.000Z", "done");
+  await store.save([r]);
+  assert.ok((await stat(join(dir, "deep", "nested"))).isDirectory());
+  assert.deepEqual(await new RunStore({ runsFile }).load(), [r]);
 });
 
 test("order stability: equal createdAt keeps insertion order across updates", async (t) => {
@@ -173,7 +178,7 @@ test("createRun: unique id, space dir on disk, running status, persisted via fre
   assert.equal(await fresh.getRun("nope"), undefined);
 });
 
-// Delta invariant (rewritten from learning #4's original global-absence
+// Delta invariant (kept from learning #4's original global-absence
 // assertion): asserting "~/.sibyl does not exist" made the suite
 // machine-state-dependent — any legitimate live E2E run (plan tasks 10/11)
 // creates <DEFAULT_SPACE_ROOT>/<runId>/ and would permanently break the
@@ -182,10 +187,12 @@ test("createRun: unique id, space dir on disk, running status, persisted via fre
 // before the store-touching operations, re-read after, assert zero new
 // entries (a pre-existing tree from real runs is tolerated; absence-to-
 // empty/absent is tolerated; absence-to-populated is a failure).
-test("learning #4: default paths with NO env seam; real write to SIBYL/.state/sibyl restored byte-exactly; createRun isolates via explicit spaceRoot — default space root gains NO new entries", async () => {
+// Restore discipline: the byte-exact restore touches the runs FILE path
+// only — never the ~/.sibyl directory itself, never its spaces sibling.
+test("default paths with NO env seam: ~/.sibyl runs.json + spaces siblings; real write restored byte-exactly; createRun isolates via explicit spaceRoot — default space root gains NO new entries", async () => {
   const savedEnv = process.env[SIBYL_STATE_FILE_ENV];
   delete process.env[SIBYL_STATE_FILE_ENV];
-  const defaultFile = join(SIBYL, ".state", "sibyl", "runs.json");
+  const defaultFile = join(homedir(), ".sibyl", "runs.json");
   const defaultSpaceRoot = join(homedir(), ".sibyl", "spaces");
   // null = root absent; a live E2E dir appearing mid-test must not fake a
   // failure verdict about OUR residue, so absence is modeled explicitly.
@@ -194,7 +201,6 @@ test("learning #4: default paths with NO env seam; real write to SIBYL/.state/si
   let prior: Buffer | null = null;
   let wroteToDefault = false;
   try {
-    assert.equal(PACKAGE_ROOT, SIBYL);
     assert.equal(DEFAULT_RUNS_FILE, defaultFile);
     assert.equal(DEFAULT_SPACE_ROOT, defaultSpaceRoot);
     const probed = new RunStore();

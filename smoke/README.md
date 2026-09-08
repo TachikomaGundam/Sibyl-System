@@ -13,8 +13,8 @@ node smoke/run-smoke.mjs   # exit 0 = SMOKE PASS
 ```
 
 The script points `SIBYL_STATE_FILE` at a throwaway `sibyl-smoke-*`
-sandbox under `os.tmpdir()` (POSIX `/tmp`, `%TEMP%` on Windows) (removed in a `finally` block). Your real `<repo>/.state` and
-`~/.sibyl` are never touched: `sibyl_status` is read-only and no run is created.
+sandbox under `os.tmpdir()` (POSIX `/tmp`, `%TEMP%` on Windows) (removed in a `finally` block). Your real `~/.sibyl` store is never
+touched: `sibyl_status` is read-only and no run is created.
 
 ## Optional live smoke (manual, at your own risk)
 
