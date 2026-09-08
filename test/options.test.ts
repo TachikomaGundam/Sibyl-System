@@ -145,10 +145,26 @@ test("options: throwing-getter config returns ok:false instead of crashing the h
   }
 });
 
-test("options: unknown keys are stripped, not errors (forward-compatible config)", () => {
-  const options = expectOk({ maxRounds: 5, fromTheFuture: { anything: 1 } }, "unknown keys");
-  assert.equal(options.maxRounds, 5);
-  assert.ok(!("fromTheFuture" in options));
+test("options: the {options:{...}} wrapper form is rejected naming the unknown key (host passes the tuple's second element VERBATIM as the options object - a nested wrapper is a config bug, never silently-defaults)", () => {
+  const result = parseOptions({ options: { maxRounds: 2 } });
+  assert.equal(result.ok, false, "wrapper form must not be accepted as all-defaults");
+  if (!result.ok) {
+    assert.ok(
+      result.errors.some((error) => error.includes("options")),
+      `errors must name the unknown key "options", got: ${result.errors.join(" | ")}`,
+    );
+  }
+});
+
+test("options: unknown keys are rejected loudly, not silently stripped (a typo'd option key must not run on defaults)", () => {
+  const result = parseOptions({ maxRounds: 5, fromTheFuture: { anything: 1 } });
+  assert.equal(result.ok, false, "unknown keys must be an error under the strict schema");
+  if (!result.ok) {
+    assert.ok(
+      result.errors.some((error) => error.includes("fromTheFuture")),
+      `errors must name the unknown key "fromTheFuture", got: ${result.errors.join(" | ")}`,
+    );
+  }
 });
 
 test("options: parsed objects are fresh instances - mutating one config never poisons later parses", () => {

@@ -28,7 +28,8 @@ human** — the offline kit above is what CI runs. The proven discipline from
    one backup copy; reuse the same baseline across the whole session.
 2. **Register** with jsonc-parser `modify` (preserves comments/formatting),
    write atomically (tmp file + rename), then **re-read the file and assert**
-   the sibyl tuple entry `[<abs path>/sibyl-system/src/index.ts, { options: {...} }]`
+   the sibyl tuple entry `[<abs path>/sibyl-system/src/index.ts, { modelPool: {...}, ... }]`
+   (option fields at the top level — the second element is passed verbatim as the options object)
    is present verbatim and all pre-existing entries are intact.
 3. **Prove the plugin loaded before spending a real run**: first
    (`timeout` is GNU-coreutils-only — macOS: `gtimeout`; Windows: omit it or use

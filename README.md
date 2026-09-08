@@ -34,11 +34,10 @@ Alternatively, register a local checkout by path. One registration line in
     [
       "/abs/path/to/sibyl-system/src/index.ts",
       {
-        "options": {
-          "modelPool": {
-            "default": { "providerID": "your-provider", "modelID": "your-model" }
-          }
-        }
+        "modelPool": {
+          "default": { "providerID": "your-provider", "modelID": "your-model" }
+        },
+        "concurrencyK": 4
       }
     ]
   ]
@@ -46,9 +45,12 @@ Alternatively, register a local checkout by path. One registration line in
 ```
 
 Registering the TS entry directly is supported (opencode transpiles plugin
-sources with Bun). The `options` object is the **only** config surface — there
-are no other config files (the `SIBYL_STATE_FILE` env var exists solely as a
-test/CI isolation seam, see State).
+sources with Bun). The tuple's second element is passed **verbatim** as the
+options object, so option fields sit at its **top level** (as in the example);
+unknown keys are rejected loudly, never silently ignored. The options object is
+the **only** config surface — there are no other config files (the
+`SIBYL_STATE_FILE` env var exists solely as a test/CI isolation seam, see
+State).
 
 Invalid options never crash the host: the plugin prints
 `[sibyl] SIBYL plugin DISABLED — fix options (no sibyl_* tools registered)` to
@@ -66,8 +68,10 @@ stderr, registers nothing, and returns empty hooks.
 
 All keys optional; a type error or a missing required entry (such as
 `modelPool.default`) disables the plugin with per-field `[sibyl] config error: …`
-lines. Unknown keys are ignored for forward-compatibility — so a typo'd option
-key runs on defaults.
+lines. Unknown keys are rejected the same loud way — so a typo'd option key or a
+misplaced nesting level (e.g. wrapping everything in `{ "options": { … } }`)
+disables the plugin with a named-key error instead of silently running on
+defaults.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
