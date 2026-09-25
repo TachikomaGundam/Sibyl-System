@@ -1,6 +1,6 @@
 # SIBYL EVOLUTION DESIGN v1.1 — 民主集中制评审装置（general-purpose review apparatus）
 
-provenance: Abathur seat, session at harness/magi, 2026-09-24. Inputs: SWARM-EVOLUTION-HANDOFF.md
+provenance: Abathur seat, session at the Sibyl-System repository (dir harness/magi, legacy name), 2026-09-24. Inputs: SWARM-EVOLUTION-HANDOFF.md
 (PCB-Agent/.omo/self-audit/, read-only), SIBYL-HANDOFF.md F1–F7, research SR1–SR4 (same dir),
 live boulder 09-18 team-mode failure + b141 three-round convergence exemplars. Human orders
 registered verbatim in .omo/evidence/INTENT-LEDGER.md.
