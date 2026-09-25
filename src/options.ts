@@ -82,6 +82,38 @@ export const pluginOptionsSchema = z
    * the same shared object reference and a caller mutation would poison all
    * later parses (proved: .omo/evidence/t6/zod-probe3.mjs). */
   modelPool: modelPoolSchema.prefault(DEFAULT_POOL),
+  /** v1.1 isolated-lane mechanics (src/lane/isolated.ts). configSource is
+   * READ-COPIED into each role home (never written back). */
+  lane: z
+    .object({
+      runRoot: z.string().min(1).default("/tmp"),
+      opencodeBin: z.string().min(1).default("<home>/.local/bin/opencode"),
+      configSource: z.string().default("<home>/.config/opencode/opencode.jsonc"),
+      roleTimeoutMs: z.number().int().min(5_000).default(600_000),
+    })
+    .prefault({}),
+  /** v1.1 E4/F1: seats only from allowed model-id prefixes; deny at launch. */
+  modelPolicy: z
+    .object({
+      allowedPrefixes: z.array(z.string().min(1)).min(1).default(["local-"]),
+    })
+    .prefault({}),
+  /** v1.1 chamber (democratic-centralism review engine) seat slots + rounds. */
+  chamber: z
+    .object({
+      maxRounds: z.number().int().min(1).max(8).default(3),
+      roles: z
+        .object({
+          evidence: slotName.default(DEFAULT_SLOT),
+          pro: slotName.default(DEFAULT_SLOT),
+          con: slotName.default(DEFAULT_SLOT),
+          judge: slotName.default(DEFAULT_SLOT),
+        })
+        .prefault({}),
+      /** slot names the judge may be drawn from (E2 pool + seed commit). */
+      judgePool: z.array(slotName).min(1).default([DEFAULT_SLOT]),
+    })
+    .prefault({}),
 })
   .strict();
 export type PluginOptions = z.infer<typeof pluginOptionsSchema>;

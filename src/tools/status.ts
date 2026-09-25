@@ -8,6 +8,10 @@
 
 import { tool } from "@opencode-ai/plugin";
 
+import { loadLedger } from "../state/chamber.ts";
+import { dirname } from "node:path";
+import { join } from "node:path";
+
 import { formatRunLine, internalError } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
@@ -40,10 +44,16 @@ export async function statusExecute(
       return [`SIBYL RUN ${run.runId}`, formatRunLine(run)].join("\n");
     }
     const runs = await deps.store.load();
-    if (runs.length === 0) {
+    const ledger = await loadLedger(join(dirname(deps.store.runsFile), "chamber-ledger.jsonl"));
+    const chamberLines = ledger.rows.slice(-5).map((r) =>
+      `${r.runId} chamber/${r.profile} ${r.terminal ?? "running"} rounds=${String(r.rounds)} artifacts=${String(r.artifacts.length)} judge=${r.judgeModelId} dir=${r.runDir}`,
+    );
+    if (runs.length === 0 && chamberLines.length === 0) {
       return `no sibyl runs recorded (store: ${deps.store.runsFile})`;
     }
-    return [`SIBYL RUNS (${String(runs.length)}, oldest first)`, ...runs.map(formatRunLine)].join("\n");
+    const head = runs.length === 0 ? [] : [`SIBYL RUNS (${String(runs.length)}, oldest first)`, ...runs.map(formatRunLine)];
+    const tail = chamberLines.length === 0 ? [] : [`CHAMBER LEDGER (last ${String(chamberLines.length)}; drops: ${String(ledger.dropped.length)})`, ...chamberLines];
+    return [...head, ...tail].join("\n");
   } catch (err) {
     return internalError(STATUS_TOOL_NAME, err);
   }
