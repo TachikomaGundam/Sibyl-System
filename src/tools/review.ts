@@ -30,7 +30,7 @@ export function nodeBinary(): string {
 /** Locate the CLI entry from either runtime position (src/tools dev, dist bundle). */
 export function cliCommand(thisUrl: string, node: string): { bin: string; args: string[] } {
   const moduleDir = dirname(fileURLToPath(thisUrl)); // .../src/tools or .../dist
-  const repoRoot = dirname(dirname(moduleDir)); // .../magi
+  const repoRoot = dirname(dirname(moduleDir));
   const distCli = join(repoRoot, "dist", "cli.js");
   if (existsSync(distCli)) return { bin: node, args: [distCli] };
   const srcCli = join(repoRoot, "src", "cli.ts");
