@@ -15,8 +15,8 @@
     {
       "id": "reread-before-correct",
       "kind": "order",
-      "pattern": "orders\\.csv",
-      "forbidAfter": "(write|edit)[^\\n]*summary\\.md|>[^\\n]*summary\\.md",
+      "pattern": "orders[.]csv",
+      "forbidAfter": "(write|edit).*summary[.]md|>.*summary[.]md",
       "note": "a correction to summary.md was issued without re-reading orders.csv in the same turn (SR4-11 pattern)"
     },
     {
