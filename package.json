@@ -1,9 +1,9 @@
 {
   "name": "sibyl-system",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "license": "MIT",
   "type": "module",
-  "description": "Sibyl-System: fail-closed 2/3 council voting + dynamic swarm plugin for OpenCode",
+  "description": "Sibyl-System: democratic-centralism review chamber (one conclusion, one voice) + fail-closed council voting + dynamic swarm plugin for OpenCode",
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -30,7 +30,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js",
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js && esbuild src/cli.ts --bundle --format=esm --platform=node --banner:js='#!/usr/bin/env node' --outfile=dist/cli.js",
     "test": "node --import ./tools/register-ts.mjs --test test/*.test.ts",
     "prepack": "npm run build"
   },
@@ -42,5 +42,8 @@
     "@types/node": "^22",
     "esbuild": "^0.25.0",
     "typescript": "^5"
+  },
+  "bin": {
+    "sibyl-chamber": "./dist/cli.js"
   }
 }
