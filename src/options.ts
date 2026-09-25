@@ -10,6 +10,9 @@
 // zod here is INTERNAL parsing only (learnings.md #17 dual-instance rule):
 // tool `args` schemas in T8 must use tool.schema.*, never this instance.
 
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 /** Default model-pool slot name every persona falls back to. */
@@ -87,8 +90,8 @@ export const pluginOptionsSchema = z
   lane: z
     .object({
       runRoot: z.string().min(1).default("/tmp"),
-      opencodeBin: z.string().min(1).default("<home>/.local/bin/opencode"),
-      configSource: z.string().default("<home>/.config/opencode/opencode.jsonc"),
+      opencodeBin: z.string().min(1).prefault(discoverOpencodeBin),
+      configSource: z.string().prefault(() => join(homedir(), ".config", "opencode", "opencode.jsonc")),
       roleTimeoutMs: z.number().int().min(5_000).default(600_000),
     })
     .prefault({}),
@@ -140,6 +143,27 @@ function describeError(err: unknown): string {
  * including objects whose property getters throw - yields ok:false with
  * readable errors. NEVER throws.
  */
+/** Headless discovery of the opencode binary for package defaults (the
+ * role lane runs on a PINNED PATH, so it must be handed an absolute bin):
+ * first hit among known install locations. Empty string when nothing is
+ * found — launchRole then fails LOUD naming the var/path, never guesses
+ * through a shell PATH. Operators override via options.lane.opencodeBin. */
+export function discoverOpencodeBin(): string {
+  const candidates = [
+    join(homedir(), ".local", "bin", "opencode"),
+    "/usr/local/bin/opencode",
+    "/usr/bin/opencode",
+  ];
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return c;
+    } catch {
+      // keep probing
+    }
+  }
+  return "";
+}
+
 export function parseOptions(raw: unknown): ParseOptionsResult {
   const input: unknown = raw === undefined ? {} : raw;
   try {

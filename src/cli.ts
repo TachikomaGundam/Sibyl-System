@@ -92,7 +92,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
   }
   const laneCfg: LaneBase = {
     runRoot: typeof flags["run-root"] === "string" ? flags["run-root"] : opts?.lane.runRoot ?? "/tmp",
-    opencodeBin: opts?.lane.opencodeBin ?? "<home>/.local/bin/opencode",
+    opencodeBin: opts?.lane.opencodeBin ?? "",
     configSource: opts?.lane.configSource ?? "",
   };
   const modelFlag = typeof flags["model"] === "string" ? flags["model"] : null;

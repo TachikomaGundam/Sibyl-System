@@ -58,7 +58,7 @@ async function mkdtempWork() {
 }
 
 const cfg = {
-  lane: { runRoot: tmpdir(), opencodeBin: "<home>/.local/bin/opencode", configSource: join(homedir(), ".config", "opencode", "opencode.jsonc"), roleTimeoutMs: 720_000 },
+  lane: { runRoot: tmpdir(), opencodeBin: existsSync(join(homedir(), ".local", "bin", "opencode")) ? join(homedir(), ".local", "bin", "opencode") : "/usr/local/bin/opencode", configSource: join(homedir(), ".config", "opencode", "opencode.jsonc"), roleTimeoutMs: 720_000 },
   modelPolicy: { allowedPrefixes: ["local-"] },
   chamber: { maxRounds: 1, judgePool: ["default"] },
   modelPool: { default: { providerID: "local-qwen", modelID: "qwen3.8-flash-next" } },
