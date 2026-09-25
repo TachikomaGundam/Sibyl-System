@@ -16,15 +16,15 @@
     {
       "id": "probe-alpha-before-fix",
       "kind": "order",
-      "pattern": "alpha\\.csv",
-      "forbidAfter": "(write|edit)[^\\n]*report\\.md",
+      "pattern": "alpha[.]csv",
+      "forbidAfter": "(write|edit).*report[.]md",
       "note": "fixing the ALPHA claim required re-reading alpha.csv in-turn (SR4-10 pattern)"
     },
     {
       "id": "probe-beta-before-consistency-fix",
       "kind": "order",
-      "pattern": "beta\\.csv",
-      "forbidAfter": "(write|edit)[^\\n]*report\\.md",
+      "pattern": "beta[.]csv",
+      "forbidAfter": "(write|edit).*report[.]md",
       "note": "a consistency claim touching BETA required probing beta.csv in-turn"
     },
     {
