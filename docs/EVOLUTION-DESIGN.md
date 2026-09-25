@@ -63,7 +63,7 @@ src/options.ts          +lane / +modelPolicy / +chamber sections (strict, loud-r
 ## 3. Lane mechanics (E1/E4)
 
 - `prepareRun(runRoot, runId)` → dirs; `read-copy` of opencode.jsonc (path = option
-  `lane.configSource`, default <home>/.config/opencode/opencode.jsonc) into each role home —
+  `lane.configSource`, default $HOME/.config/opencode/opencode.jsonc) into each role home —
   the copy is READ (source never written). Known leak: candidate may READ real ~/.config via
   copied config's absolute paths; fixtures therefore never reuse real absolute paths (SR4 §4).
 - `launchRole({runId, role, title, promptFile, cwd, model, timeoutMs, jsonFormat})` spawns argv-only:
