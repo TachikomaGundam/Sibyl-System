@@ -1,10 +1,12 @@
 // provenance: original clean-room Sibyl-System implementation (plan task 8 — plugin
 // entry), no swarm code copied.
 //
-// The SIBYL plugin surface: three tools registered through the SDK tool()
+// The SIBYL plugin surface: four tools registered through the SDK tool()
 // helper — sibyl_consult (fail-closed 3-persona council verdict), sibyl_swarm
 // (thin driver of the PLAN→MINT→DISPATCH→AGGREGATE pipeline), sibyl_status
-// (read-only run store view). Zero external fleet-orchestration coupling by design.
+// (read-only run store + chamber ledger view), sibyl_review (v1.1 general
+// democratic-centralism chamber: any review need, one voice at terminal).
+// Zero external fleet-orchestration coupling by design.
 //
 // Entry contract (spike/GO.md, learnings #3): a plugin that throws on load
 // fails SILENTLY inside the host — so config errors are reported LOUDLY via
@@ -19,6 +21,7 @@ import type { EngineClient } from "./engine/index.ts";
 import { parseOptions } from "./options.ts";
 import { RunStore } from "./state/index.ts";
 import { buildConsultTool } from "./tools/consult.ts";
+import { buildReviewTool } from "./tools/review.ts";
 import { buildStatusTool } from "./tools/status.ts";
 import { buildSwarmTool } from "./tools/swarm.ts";
 import type { ToolDeps } from "./tools/shared.ts";
@@ -104,6 +107,7 @@ export default async function SibylPlugin(
       sibyl_consult: buildConsultTool(deps),
       sibyl_swarm: buildSwarmTool(deps),
       sibyl_status: buildStatusTool(deps),
+      sibyl_review: buildReviewTool(deps),
     },
   };
 }

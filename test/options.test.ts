@@ -175,3 +175,28 @@ test("options: parsed objects are fresh instances - mutating one config never po
   assert.equal(second.modelPool.default.providerID, "");
   assert.equal(second.voters.MELCHIOR, "default");
 });
+
+/* ── v1.1 sections: lane / modelPolicy / chamber ─────────────────────── */
+
+test("v1.1 sections: absent config yields the isolated-lane + local-policy + chamber defaults", () => {
+  const r = parseOptions(undefined);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.options.lane.runRoot, "/tmp");
+  assert.equal(r.options.lane.roleTimeoutMs, 600_000);
+  assert.equal(r.options.lane.opencodeBin.length > 0, true);
+  assert.deepEqual(r.options.modelPolicy.allowedPrefixes, ["local-"]);
+  assert.equal(r.options.chamber.maxRounds, 3);
+  assert.deepEqual(r.options.chamber.roles, { evidence: "default", pro: "default", con: "default", judge: "default" });
+  assert.deepEqual(r.options.chamber.judgePool, ["default"]);
+});
+
+test("v1.1 sections: hostile values fail loud (never silently default)", () => {
+  assert.ok(!parseOptions({ lane: { roleTimeoutMs: 1_000 } }).ok); // < 5s floor
+  assert.ok(!parseOptions({ modelPolicy: { allowedPrefixes: [] } }).ok); // empty policy = deny-everything typo risk
+  assert.ok(!parseOptions({ chamber: { maxRounds: 9 } }).ok); // > 8 cap
+  assert.ok(!parseOptions({ chamber: { judgePool: [] } }).ok); // empty draw pool
+  assert.ok(!parseOptions({ lanee: {} }).ok); // strict top level still strict
+  const good = parseOptions({ modelPolicy: { allowedPrefixes: ["local-", "ollama-"] } });
+  assert.ok(good.ok);
+});

@@ -1,7 +1,7 @@
 // provenance: original clean-room Sibyl-System implementation (plan task 8), no swarm
 // code copied.
 //
-// Plugin-entry tests: registration surface (exactly the three sibyl tools, no
+// Plugin-entry tests: registration surface (exactly the four sibyl tools, no
 // placeholder), the LOUD disable path on invalid config (learnings #3: plugin
 // load failures are silent in the host), the SIBYL_STATE_FILE seam reaching the
 // entry-constructed RunStore, the toEngineClient SDK->EngineClient normalizer
@@ -56,7 +56,7 @@ test("entry registers exactly sibyl_consult, sibyl_swarm, sibyl_status — no pl
   const { sdk } = fakeSdkClient({});
   const hooks = await SibylPlugin(fakeInput(sdk), undefined);
   const names = Object.keys(hooks.tool ?? {}).sort();
-  assert.deepEqual(names, ["sibyl_consult", "sibyl_status", "sibyl_swarm"]);
+  assert.deepEqual(names, ["sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
   const consult = hooks.tool?.["sibyl_consult"];
   assert.ok(consult !== undefined && typeof consult.execute === "function" && typeof consult.description === "string");
   assert.deepEqual(Object.keys(consult.args).sort(), ["artifact", "goal"]);
@@ -114,7 +114,7 @@ test("entry: direct top-level options reach the schema (maxRounds:2 registers th
   const { sdk } = fakeSdkClient({});
   const hooks = await SibylPlugin(fakeInput(sdk), { maxRounds: 2 });
   const names = Object.keys(hooks.tool ?? {}).sort();
-  assert.deepEqual(names, ["sibyl_consult", "sibyl_status", "sibyl_swarm"]);
+  assert.deepEqual(names, ["sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
 });
 
 test("entry: SIBYL_STATE_FILE seam reaches the store used by the registered tools", async () => {
