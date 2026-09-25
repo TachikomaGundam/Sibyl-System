@@ -1,6 +1,6 @@
 # 隔离法 L1–L7 落地合同（Isolation Laws, v1.1）
 
-provenance: Abathur seat, harness/magi v1.1, 2026-09-24. 法源:
+provenance: Abathur seat, Sibyl-System repository (dir harness/magi, legacy name) v1.1, 2026-09-24. 法源:
 PCB-Agent/.omo/self-audit/SWARM-EVOLUTION-HANDOFF.md（L1–L7 + E1–E6 + A1–A5）；
 每条给出"机器可复核的实现位置 + 测试名"，违反任一条 = 测试红，不是文档建议。
 
