@@ -71,7 +71,7 @@ test("council: every persona covers its id and demands the exact JSON contract",
 
 // --- exhaustive 4^3 matrix ------------------------------------------------------
 
-test("council: all 64 vote combinations tally fail-closed - APPROVE only when >=2 approvals and 3rd is REJECT", () => {
+test("council: all 64 vote combinations tally fail-closed - APPROVE only when >=2 approvals and 3rd is REJECT; REJECT only when the council spoke; quorum-broken rows CANNOT_ANSWER", () => {
   let approveCells = 0;
   let visited = 0;
   for (const a of CELLS) {
@@ -85,9 +85,18 @@ test("council: all 64 vote combinations tally fail-closed - APPROVE only when >=
         const errors = countCells(cells, "ERROR");
         const missing = countCells(cells, "MISSING");
         // Expected derived from the combinatorial semantics of the user-pinned
-        // rule: >=2 approvals AND every seat present (no error/missing), i.e.
-        // the non-approvals are plain REJECT votes.
-        const expected = approvals >= 2 && approvals + rejects === 3 ? "APPROVE" : "REJECT";
+        // rule: APPROVE needs >=2 approvals AND every seat present. REJECT is
+        // decided only when all seats spoke or >=2 substantive rejects exist;
+        // anything else (error/missing seat, <2 rejects) never formed a
+        // decision -> CANNOT_ANSWER (still never an APPROVE).
+        const expected =
+          approvals >= 2 && approvals + rejects === 3
+            ? "APPROVE"
+            : errors === 0 && missing === 0
+              ? "REJECT"
+              : rejects >= 2
+                ? "REJECT"
+                : "CANNOT_ANSWER";
         assert.equal(result.verdict, expected, `cells ${a}/${b}/${c}`);
         assert.equal(result.approvals, approvals);
         assert.equal(result.rejects, rejects);
@@ -113,22 +122,23 @@ test("council: 3 approvals approve under majority2of3", () => {
   assert.equal(result.verdict, "APPROVE");
 });
 
-test("council: 2 approvals + 1 error reject (fail-closed, lenient mode forbidden)", () => {
+test("council: 2 approvals + 1 error CANNOT_ANSWER - never APPROVE (pin), never a substantive reject (a061)", () => {
   const result = tallyVotes(ballot("APPROVE", "APPROVE", "ERROR"));
-  assert.equal(result.verdict, "REJECT");
+  assert.equal(result.verdict, "CANNOT_ANSWER");
   assert.equal(result.approvals, 2);
   assert.equal(result.errors, 1);
+  assert.ok(result.reasons.some((r) => r.includes("NOT a substantive reject")), result.reasons.join("\n"));
 });
 
-test("council: 2 approvals + 1 missing reject (fail-closed)", () => {
+test("council: 2 approvals + 1 missing CANNOT_ANSWER (quorum broken, fail-closed vs APPROVE)", () => {
   const result = tallyVotes(ballot("APPROVE", "MISSING", "APPROVE"));
-  assert.equal(result.verdict, "REJECT");
+  assert.equal(result.verdict, "CANNOT_ANSWER");
   assert.equal(result.missing, 1);
 });
 
-test("council: 1-1 tie with error vote reject", () => {
+test("council: 1-1 tie with error vote CANNOT_ANSWER (third seat could have tipped)", () => {
   const result = tallyVotes(ballot("APPROVE", "REJECT", "ERROR"));
-  assert.equal(result.verdict, "REJECT");
+  assert.equal(result.verdict, "CANNOT_ANSWER");
 });
 
 test("council: 2 approvals + 1 reject approve (all three present)", () => {
@@ -136,9 +146,9 @@ test("council: 2 approvals + 1 reject approve (all three present)", () => {
   assert.equal(result.verdict, "APPROVE");
 });
 
-test("council: no votes present reject", () => {
+test("council: no substantive votes CANNOT_ANSWER", () => {
   const result = tallyVotes(ballot("MISSING", "ERROR", "MISSING"));
-  assert.equal(result.verdict, "REJECT");
+  assert.equal(result.verdict, "CANNOT_ANSWER");
   assert.equal(result.approvals, 0);
   assert.equal(result.errors, 1);
   assert.equal(result.missing, 2);
@@ -178,7 +188,7 @@ test("council: merges reasons/must_fix of ALL present votes regardless of ballot
     { id: "CASPER", ok: false, error: "timeout" },
   ];
   const result = tallyVotes(votes);
-  assert.equal(result.verdict, "REJECT"); // 1 approval + 1 error -> fail-closed
+  assert.equal(result.verdict, "CANNOT_ANSWER"); // 1 approval + 1 reject + 1 error -> undecided
   // Voter-order first-occurrence dedupe; error/missing fail-closed notes lead.
   assert.deepEqual(
     result.reasons.filter((r) => !r.startsWith("CASPER") && !r.startsWith("policy ")),
@@ -273,7 +283,7 @@ test("council: ok:true with non-array reasons demotes to error vote", () => {
     verdict: { ...verdictFor("APPROVE", "CASPER"), reasons: "trust me" },
   } as unknown as CouncilVote;
   const result = tallyVotes([voteFor("MELCHIOR", "APPROVE"), voteFor("BALTHASAR", "APPROVE"), malformed]);
-  assert.equal(result.verdict, "REJECT");
+  assert.equal(result.verdict, "CANNOT_ANSWER");
   assert.equal(result.errors, 1);
   assert.equal(result.approvals, 2);
 });
@@ -293,7 +303,7 @@ test("council: malformed-payload voter contributes nothing; valid voters still m
     },
   ];
   const result = tallyVotes(votes);
-  assert.equal(result.verdict, "REJECT"); // 1 approval + 1 error -> fail-closed
+  assert.equal(result.verdict, "CANNOT_ANSWER"); // 1A + 1R + 1 error -> undecided
   assert.equal(result.errors, 1);
   assert.equal(result.approvals, 1);
   assert.equal(result.rejects, 1);
@@ -320,7 +330,7 @@ test("council: unanimous policy approves only all-3 approvals", () => {
   const split = tallyVotes(ballot("APPROVE", "APPROVE", "REJECT"), unanimous);
   assert.equal(split.verdict, "REJECT");
   assert.equal(split.policy, "unanimous");
-  assert.equal(tallyVotes(ballot("APPROVE", "APPROVE", "ERROR"), unanimous).verdict, "REJECT");
+  assert.equal(tallyVotes(ballot("APPROVE", "APPROVE", "ERROR"), unanimous).verdict, "CANNOT_ANSWER");
 });
 
 // --- determinism --------------------------------------------------------------------
