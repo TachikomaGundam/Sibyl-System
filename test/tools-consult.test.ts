@@ -157,7 +157,7 @@ test("consult repair: unparseable voter gets ONE in-session JSON-only follow-up"
   assert.deepEqual(repair.tools, { bash: false, edit: false, write: false });
 });
 
-test("consult repair failure: second garbage reply falls through to fail-closed unparseable REJECT", async () => {
+test("consult repair failure: second garbage reply becomes an ERROR ballot, never a fake REJECT vote", async () => {
   const { deps, prompts } = await fixture({
     "sess-1": [{ text: MEL_REJECT }],
     "sess-2": [{ text: "nope" }, { text: "still nope" }],
@@ -166,13 +166,14 @@ test("consult repair failure: second garbage reply falls through to fail-closed 
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
 
   assert.ok(out.includes("verdict-unparseable"), out);
-  assert.ok(out.startsWith("SIBYL CONSULT: REJECT"), out);
+  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 1A/1R/1E/0M)"), out.slice(0, 70));
+  assert.ok(out.includes("NOT a substantive reject"), out);
   assert.equal(prompts.length, 4); // exactly ONE repair shot, never a second
   const run = (await loadRuns(deps.store))[0];
-  assert.ok(run?.notes !== undefined && run.notes.includes("BALTHASAR=REJECT"), run?.notes);
+  assert.ok(run?.notes !== undefined && run.notes.includes("BALTHASAR=ERROR"), run?.notes);
 });
 
-test("consult engine failure: errored voter becomes a fail-closed error vote (2A+1E -> REJECT)", async () => {
+test("consult engine failure: errored voter leaves the seat unanswered (2A+1E -> CANNOT_ANSWER, never APPROVE)", async () => {
   const { deps } = await fixture({
     "sess-1": [{ error: { name: "ProviderAuthError" } }],
     "sess-2": [{ text: BAL_APPROVE }],
@@ -180,12 +181,12 @@ test("consult engine failure: errored voter becomes a fail-closed error vote (2A
   });
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
 
-  assert.ok(out.startsWith("SIBYL CONSULT: REJECT (votes 2A/0R/1E/0M)"), out.slice(0, 60));
+  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 2A/0R/1E/0M)"), out.slice(0, 70));
   assert.ok(out.includes("MELCHIOR errored"), out);
 
   const run = (await loadRuns(deps.store))[0];
   assert.ok(run !== undefined);
-  assert.deepEqual(run.verdict, { verdict: "REJECT", approvals: 2, rejects: 0, errors: 1, missing: 0 });
+  assert.deepEqual(run.verdict, { verdict: "CANNOT_ANSWER", approvals: 2, rejects: 0, errors: 1, missing: 0 });
   const reply = await readFile(join(run.spaceDir, "MELCHIOR.md"), "utf8");
   assert.ok(reply.includes("engine call failed"), reply);
   assert.ok(reply.includes("ProviderAuthError"), reply);

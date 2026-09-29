@@ -101,7 +101,7 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
 
   // parseVerdict's single repair shot: a follow-up prompt INTO THIS voter's own
   // session. A failed follow-up yields "" -> the parse falls through to the
-  // fail-closed "verdict-unparseable" REJECT vote.
+  // fail-closed "verdict-unparseable" sentinel.
   const verdict = await parseVerdict(result.text, async (_badText, why) => {
     const followed = await runInSession(
       client,
@@ -114,11 +114,16 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
     return followed.ok ? followed.text : "";
   });
 
-  const vote: CouncilVote = { id, ok: true, verdict };
-  const meta =
-    `ballot: ${verdict.verdict} (confidence ${String(verdict.confidence)}) · ` +
-    `session ${result.sessionID} · model ${result.modelApplied ?? "host-picked"} · ${String(result.latencyMs)}ms` +
-    (verdict.reasons[0]?.startsWith("verdict-unparseable") ? "\nnote: reply did not parse; fail-closed REJECT" : "");
+  // The sentinel is not a ballot: an unparseable reply means this seat failed to
+  // answer, not that it voted REJECT (mirrors the CANNOT_ANSWER semantics).
+  const unparseable = verdict.reasons[0]?.startsWith("verdict-unparseable") ?? false;
+  const vote: CouncilVote = unparseable
+    ? { id, ok: false, error: verdict.reasons[0] ?? "verdict-unparseable" }
+    : { id, ok: true, verdict };
+  const meta = unparseable
+    ? `ballot: ERROR ${verdict.reasons[0] ?? "verdict-unparseable"} (reply did not parse)`
+    : `ballot: ${verdict.verdict} (confidence ${String(verdict.confidence)}) · ` +
+      `session ${result.sessionID} · model ${result.modelApplied ?? "host-picked"} · ${String(result.latencyMs)}ms`;
   const replyAt = await safeWrite(replyPath, renderReply(id, result.text, meta));
   return { id, vote, replyPath: replyAt, modelApplied: result.modelApplied, latencyMs: result.latencyMs };
 }
@@ -136,8 +141,9 @@ export function buildConsultTool(deps: ToolDeps) {
   return tool({
     description:
       "SIBYL council consult: audit an artifact (file path or inline multi-line text, max 256 KiB) with the three " +
-      "councilor personas (MELCHIOR/BALTHASAR/CASPER) in parallel and return the fail-closed 2/3 verdict plus " +
-      "reasons, must-fix items, run id, and per-voter reply files.",
+      "councilor personas (MELCHIOR/BALTHASAR/CASPER) in parallel and return the fail-closed 2/3 verdict " +
+      "(APPROVE / REJECT / CANNOT_ANSWER when error or missing seats left no decision) plus reasons, must-fix " +
+      "items, run id, and per-voter reply files.",
     args: {
       artifact: tool.schema.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
       goal: tool.schema.string().min(1).describe("What the artifact is supposed to achieve."),

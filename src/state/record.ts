@@ -12,7 +12,14 @@ export type RunKind = (typeof RUN_KINDS)[number];
 export const RUN_STATUSES = ["running", "done", "failed", "suspended"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
-export const VERDICT_TAGS = ["APPROVE", "REJECT"] as const;
+// CANNOT_ANSWER (added 2026-09-29 after the G10 review series): the council could
+// not form a decision — error/missing ballots left neither an approval path nor a
+// decided rejection. It is NOT a substantive reject: conflating a wounded ruler
+// with an adverse vote lets infra failures veto on the merits (run
+// sibyl-20260928T182401Z-a061: 2A/0R/1E was reported as REJECT). Fail-closed is
+// preserved: CANNOT_ANSWER can never APPROVE; the user-pinned rule
+// (any error/missing vote makes APPROVE impossible) still holds verbatim.
+export const VERDICT_TAGS = ["APPROVE", "REJECT", "CANNOT_ANSWER"] as const;
 export type VerdictTag = (typeof VERDICT_TAGS)[number];
 
 export type RunVerdict = {

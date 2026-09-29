@@ -8,7 +8,11 @@
 // USER-PINNINED RULE (plan Scope 2, non-negotiable): the council is
 // fail-closed — any tie / missing(veto null) / error vote makes a full APPROVE
 // impossible. A "lenient" mode is deliberately NOT provided and must never be
-// added.
+// added. This still holds after the 2026-09-29 CANNOT_ANSWER addition: the
+// approval predicate was NOT relaxed — no error/missing run can ever APPROVE.
+// What changed is only the LABEL of runs where the council could not form a
+// decision (quorum broken ≠ adverse vote on the merits); APPROVE requires the
+// same votes as before, REJECT now means the council actually spoke.
 
 import type { Verdict } from "../verdict/index.ts";
 
@@ -32,7 +36,7 @@ export type CouncilVote =
   | { id: CouncilorId; missing: true };
 
 export type TallyResult = {
-  verdict: "APPROVE" | "REJECT";
+  verdict: "APPROVE" | "REJECT" | "CANNOT_ANSWER";
   approvals: number;
   rejects: number;
   errors: number;
@@ -219,7 +223,11 @@ function dedupePreserveOrder(entries: readonly string[]): string[] {
   return out;
 }
 
-/** Shared execution core: structural gate -> count -> predicate -> result. */
+/** Shared execution core: structural gate -> count -> predicate -> result.
+ * Terminal states: APPROVE only via the pinned predicate; REJECT when the
+ * council actually spoke (all ballots substantive, or >=2 substantive rejects);
+ * CANNOT_ANSWER when error/missing seats left the decision unformed — the
+ * fail-closed pin still forbids those runs any APPROVE. */
 function runPolicy(
   votes: readonly CouncilVote[],
   policyName: string,
@@ -227,21 +235,36 @@ function runPolicy(
 ): TallyResult {
   const observed = inspect(votes);
   const issue = structuralIssue(votes);
-  const approve = issue === null && canApprove(observed);
+  const allSubstantive = observed.errors === 0 && observed.missing === 0;
+  const outcome: TallyResult["verdict"] =
+    issue !== null
+      ? "REJECT"
+      : canApprove(observed)
+        ? "APPROVE"
+        : allSubstantive || observed.rejects >= 2
+          ? "REJECT"
+          : "CANNOT_ANSWER";
   const reasons: string[] = [];
   if (issue !== null) {
     reasons.push(issue);
   }
   reasons.push(...observed.notes);
-  if (!approve) {
+  if (outcome === "REJECT" && issue === null) {
     reasons.push(
       `policy ${policyName} did not reach approval: ${observed.approvals}/${COUNCIL_SIZE} approvals, ` +
         `${observed.errors} error, ${observed.missing} missing (fail-closed REJECT)`,
     );
   }
+  if (outcome === "CANNOT_ANSWER") {
+    reasons.push(
+      `policy ${policyName} could not answer: ${observed.errors} error + ${observed.missing} missing ` +
+        `ballot(s) leave no decision (quorum broken) — NOT a substantive reject; repair the infra ` +
+        `(see run notes) and re-run`,
+    );
+  }
   reasons.push(...dedupePreserveOrder(observed.reasons));
   return {
-    verdict: approve ? "APPROVE" : "REJECT",
+    verdict: outcome,
     approvals: observed.approvals,
     rejects: observed.rejects,
     errors: observed.errors,
