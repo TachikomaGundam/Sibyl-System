@@ -27,6 +27,10 @@ import type { PluginOptions } from "../options.ts";
 export type ToolContextLike = {
   directory: string;
   abort: AbortSignal;
+  /** ID of the session that invoked the sibyl tool — voter/worker children are
+   * created with this as parentID so they nest instead of cluttering the TUI
+   * root list (the picker queries parentID:null). Empty string disables nesting. */
+  sessionID: string;
 };
 
 /** Dependencies injected once by the plugin entry (one RunStore instance —

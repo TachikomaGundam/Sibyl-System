@@ -91,6 +91,7 @@ type Ctx = {
   stateBy: Map<string, DispatchTaskState>;
   client: DispatchOptions["client"];
   directory: string;
+  parentID: DispatchOptions["parentID"];
   concurrencyK: number;
   staggerMs: number;
   maxAttempts: number;
@@ -160,6 +161,7 @@ async function runTask(ctx: Ctx, task: DispatchTaskState): Promise<void> {
         model: worker.model,
         inputText: composeTaskPrompt(ctx, task.taskId),
         timeoutMs: worker.timeoutMs,
+        parentID: ctx.parentID,
       });
     } catch (e) {
       task.status = "failed";
@@ -253,6 +255,7 @@ async function run(prior: DispatchState | undefined, roster: Roster, opts: Dispa
     const resolved: Resolved = {
       client: opts.client,
       directory: opts.directory,
+      parentID: opts.parentID,
       concurrencyK: opts.concurrencyK,
       staggerMs: opts.staggerMs,
       maxAttempts,

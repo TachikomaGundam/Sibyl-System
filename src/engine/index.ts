@@ -10,8 +10,10 @@
 //
 // Contract implemented verbatim from spike/GO.md "FINAL working API shape" +
 // "Recommended engine contract":
-//   - session.create({ body: { title }, query: { directory } }) — parentID
-//     omitted (spike gotcha 3: top-level children prompt fine)
+//   - session.create({ body: { title, parentID? }, query: { directory } }) —
+//     parentID is threaded from the calling tool session (RunPersonaOptions):
+//     parented children stay out of the TUI root list; omitted → top-level
+//     (spike gotcha 3 proved prompting works either way)
 //   - session.prompt({ path: { id }, body: { model, agent, system, tools,
 //     parts }, query: { directory } }) — parts REQUIRED and non-empty
 //   - tools = every disallowedTool name mapped to false (default
@@ -59,7 +61,7 @@ export type PersonaRunResult = {
 export type EngineClient = {
   session: {
     create(args: {
-      body: { title: string };
+      body: { title: string; parentID?: string | undefined };
       query: { directory: string };
     }): Promise<{ data?: { id?: string }; error?: unknown }>;
     prompt(args: {
@@ -89,6 +91,12 @@ export type RunPersonaOptions = {
   model: { providerID: string; modelID: string };
   inputText: string;
   timeoutMs?: number;
+  /** Nest the child session under the CALLING session (L1 UI hygiene): the TUI
+   * session picker lists only root sessions (`parentID: null` query), so a
+   * parented voter/worker never clutters the human's top-level session list,
+   * stays navigable from the parent, and its full transcript remains in the
+   * DB as evidence. Omitted or empty → top-level (pre-1.1.1 behavior). */
+  parentID?: string | undefined;
 };
 
 const DEFAULT_TIMEOUT_MS = 240_000;
@@ -128,7 +136,7 @@ function describeError(e: unknown): string {
 
 /** Drive one child session; never throws, always returns a structured result. */
 export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunResult> {
-  const { client, directory, persona, model, inputText } = opts;
+  const { client, directory, persona, model, inputText, parentID } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const t0 = Date.now();
 
@@ -150,7 +158,10 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
     stage = "create";
     const created = await withTimeout(
       client.session.create({
-        body: { title: `sibyl:${persona.agent ?? "persona"}` },
+        body: {
+          title: `sibyl:${persona.agent ?? "persona"}`,
+          ...(parentID !== undefined && parentID.length > 0 && { parentID }),
+        },
         query: { directory },
       }),
       timeoutMs,

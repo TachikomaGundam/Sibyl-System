@@ -34,10 +34,12 @@ type Step = { text?: string; error?: unknown };
 function scripted(script: Record<string, Step[]>) {
   let created = 0;
   const prompts: { id: string; text: string }[] = [];
+  const creates: { title: string; parentID?: string | undefined }[] = [];
   const client: EngineClient = {
     session: {
-      async create() {
+      async create(args) {
         created += 1;
+        creates.push(args.body);
         return { data: { id: `sess-${String(created)}` } };
       },
       async prompt(args) {
@@ -53,7 +55,7 @@ function scripted(script: Record<string, Step[]>) {
       },
     },
   };
-  return { client, prompts, createCount: () => created };
+  return { client, prompts, creates, createCount: () => created };
 }
 
 function opts(raw: unknown): PluginOptions {
@@ -64,11 +66,11 @@ function opts(raw: unknown): PluginOptions {
 
 async function fixture(script: Record<string, Step[]>, raw?: unknown) {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-swarm-"));
-  const { client, prompts, createCount } = scripted(script);
+  const { client, prompts, creates, createCount } = scripted(script);
   const store = new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") });
   const deps: ToolDeps = { client, store, options: opts(raw) };
-  const ctx: ToolContextLike = { directory: "/sw", abort: new AbortController().signal };
-  return { deps, ctx, dir, prompts, createCount, store };
+  const ctx: ToolContextLike = { directory: "/sw", abort: new AbortController().signal, sessionID: "ses_caller" };
+  return { deps, ctx, dir, prompts, creates, createCount, store };
 }
 
 function happyScript(): Record<string, Step[]> {
@@ -174,4 +176,17 @@ test("swarm worker failure cascade: exhausted retries fail the task, dependent b
   const run = await oneRun(store);
   assert.equal(run.status, "done"); // pipeline completed; the VERDICT carries the failure
   assert.deepEqual(run.verdict, { verdict: "REJECT", approvals: 0, rejects: 2, errors: 0, missing: 0 });
+});
+
+// --- L1 UI hygiene: EVERY swarm child (architect, workers, judge) nests under
+// the caller so the human's TUI root list stays clean.
+
+test("swarm nests architect, worker and judge sessions under the caller", async () => {
+  const { deps, ctx, creates } = await fixture({
+    ...happyScript(),
+    "sess-4": [{ text: "REJECT" }],
+  });
+  await swarmExecute(deps, { artifact: "a\nb", goal: "g", judge: true }, ctx);
+  assert.ok(creates.length >= 4, `expected architect+2 workers+judge, got ${String(creates.length)}`);
+  for (const c of creates) assert.equal(c.parentID, "ses_caller");
 });

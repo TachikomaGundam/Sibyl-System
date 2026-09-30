@@ -121,7 +121,7 @@ test("reviewExecute error doors return strings, never throw, never spawn", async
     store: new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: dir }),
     options: opts.options,
   };
-  const ctx = { directory: dir, abort: new AbortController().signal };
+  const ctx = { directory: dir, abort: new AbortController().signal, sessionID: "ses_cli" };
   const noGoal = await reviewExecute(deps, { target: "x.md", goal: "  " }, ctx);
   assert.match(noGoal, /goal is required/);
   const badTarget = await reviewExecute(deps, { target: join(dir, "missing-file.md"), goal: "g" }, ctx);

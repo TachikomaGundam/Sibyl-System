@@ -115,6 +115,7 @@ export async function swarmExecute(
     goal: args.goal,
     artifact: read.text,
     timeoutMs: options.timeoutMs,
+    parentID: context.sessionID,
     repair: async (_badText, why) => {
       const redo = await runPersona({
         client,
@@ -125,6 +126,7 @@ export async function swarmExecute(
           `${buildRepairDemand(why)} matching the workflow-schema contract: ` +
           '{"tasks":[{"id","title","instructions","dependsOn"}],"concurrency":<int >= 1>,"notes":<string>}',
         timeoutMs: options.timeoutMs,
+        parentID: context.sessionID,
       });
       return redo.ok ? redo.text : "";
     },
@@ -146,6 +148,7 @@ export async function swarmExecute(
   const dispatch = await dispatchRoster(mint.roster, {
     client,
     directory,
+    parentID: context.sessionID,
     concurrencyK: Math.min(options.concurrencyK, plan.schema.concurrency),
     staggerMs: options.staggerMs,
     maxRounds: options.maxRounds,
@@ -178,6 +181,7 @@ export async function swarmExecute(
       model: slotForModel(options.modelPool, options.swarm.judge, undefined),
       inputText: buildJudgeInput(report),
       timeoutMs: options.timeoutMs,
+      parentID: context.sessionID,
     });
     const word = judged.ok ? parseJudgeWord(judged.text) : null;
     judgeNote =

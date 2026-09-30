@@ -184,3 +184,13 @@ test("grep gate: zero team-mode / oh-my-openagent references anywhere under src/
   }
   assert.deepEqual(offenders, []);
 });
+
+test("toEngineClient forwards parentID into the SDK create body; absent stays absent", async () => {
+  const { sdk, calls } = fakeSdkClient({});
+  const engine: EngineClient = toEngineClient(sdk);
+  await engine.session.create({ body: { title: "t", parentID: "ses_p" }, query: { directory: "/d" } });
+  await engine.session.create({ body: { title: "t2" }, query: { directory: "/d" } });
+  assert.deepEqual(calls.create[0], { body: { title: "t", parentID: "ses_p" }, query: { directory: "/d" } });
+  const second = calls.create[1] as { body: Record<string, unknown> };
+  assert.equal("parentID" in second.body, false);
+});

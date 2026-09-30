@@ -22,6 +22,7 @@ export type PlanOptions = {
   /** The artifact under consideration (path or inline text, as the driver provides). */
   artifact: string;
   timeoutMs?: number;
+  parentID?: string | undefined;
   /** Plan §75: verdict-layer repair PATTERN applied to the schema pass (verdict's own repair is Verdict-typed). */
   repair?: (badText: string, why: string) => string | Promise<string>;
 };
@@ -175,6 +176,7 @@ export async function planWorkflow(opts: PlanOptions): Promise<PlanResult> {
       model: opts.model,
       inputText: buildPlanInstruction(opts.goal, opts.artifact),
       ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts.parentID !== undefined ? { parentID: opts.parentID } : {}),
     });
   } catch (e) {
     return { ok: false, stage: "plan", error: `architect runPersona threw: ${String(e)}` };
