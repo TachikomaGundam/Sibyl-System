@@ -331,6 +331,56 @@ test("salvage: timeout+messages read error -> fail combines both, still no fabri
   assert.ok(result.error!.includes("engine db locked"));
 });
 
+// SEATS-01 final layer: the 300s transport cut ("fetch failed" from undici's
+// headersTimeout) also leaves the session alive — salvage must cover it.
+test("salvage: transport cut 'fetch failed' then completed ballot -> ok:true salvaged", { timeout: 5_000 }, async () => {
+  const { client } = scriptedClient({
+    prompt: async () => {
+      throw new Error("fetch failed");
+    },
+    messages: () => ({
+      data: [
+        {
+          info: { role: "assistant", providerID: "acme", modelID: "m1", time: { completed: 123 } },
+          parts: [{ type: "text", text: "SALVAGED-BALLOT" }],
+        },
+      ],
+    }),
+  });
+  const result = await runPersona({ ...baseOpts(client), ...SALVAGE_OPTS });
+  assert.equal(result.ok, true);
+  assert.equal(result.salvaged, true);
+  assert.equal(result.text, "SALVAGED-BALLOT");
+  assert.equal(result.modelApplied, "acme/m1");
+});
+
+test("salvage: transport cut, no completed ballot -> original 'fetch failed' preserved, no salvaged flag", { timeout: 5_000 }, async () => {
+  const { client } = scriptedClient({
+    prompt: async () => {
+      throw new Error("fetch failed");
+    },
+    messages: () => ({ data: [{ info: { role: "assistant", time: {} }, parts: [] }] }),
+  });
+  const result = await runPersona({ ...baseOpts(client), timeoutMs: 100, salvageMs: 120, salvagePollMs: 20 });
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, "prompt");
+  assert.ok(result.error!.includes("fetch failed"));
+  assert.equal(result.salvaged, undefined);
+});
+
+test("non-salvage prompt throw (programming error) fails fast: original message kept, messages never polled", { timeout: 5_000 }, async () => {
+  const { client, calls } = scriptedClient({
+    prompt: async () => {
+      throw new TypeError("cannot read properties of undefined");
+    },
+    messages: () => ({ data: [] }),
+  });
+  const result = await runPersona({ ...baseOpts(client), ...SALVAGE_OPTS });
+  assert.equal(result.ok, false);
+  assert.ok(result.error!.includes("cannot read properties of undefined"));
+  assert.equal(calls.messages, 0);
+});
+
 test("concurrent safety: 3 parallel runPersona calls stay isolated (council Promise.all contract)", async () => {
   let nextId = 0;
   const { client, calls } = scriptedClient({

@@ -174,6 +174,18 @@ function describeError(e: unknown): string {
 
 const DEFAULT_SALVAGE_POLL_MS = 5_000;
 
+/**
+ * Prompt-call failures that leave the engine session ALIVE and still working:
+ * our own race timeout ("session.prompt timeout after …ms") and transport-class
+ * cuts (undici headersTimeout → "fetch failed", socket resets — observed cutting
+ * at exactly 300s while server-side ballots ran to completion). Both are
+ * salvage-eligible (SEATS-01 final layer, VideoGen 2026-09-30): the recovery
+ * tally proved four ballots finished after "fetch failed" client deaths. Other
+ * throws (programming errors) keep failing fast without polling.
+ */
+const SALVAGE_ELIGIBLE_PROMPT_FAILURE =
+  /timeout|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|UND_ERR_/i;
+
 type PromptResponse = Awaited<ReturnType<EngineClient["session"]["prompt"]>>;
 
 type SalvageOutcome =
@@ -289,8 +301,8 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
         "session.prompt",
       );
     } catch (e) {
-      const timeoutMessage = e instanceof Error ? e.message : describeError(e);
-      if (!timeoutMessage.includes("timeout")) throw e;
+      const promptFailure = e instanceof Error ? e.message : describeError(e);
+      if (!SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(promptFailure)) throw e;
       const graceMs = opts.salvageMs ?? timeoutMs;
       const outcome = await salvageAfterPromptTimeout(
         client,
@@ -299,9 +311,9 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
         graceMs,
         opts.salvagePollMs ?? DEFAULT_SALVAGE_POLL_MS,
       );
-      if (!outcome) return fail(timeoutMessage);
+      if (!outcome) return fail(promptFailure);
       if (outcome.kind === "error") {
-        return fail(`${timeoutMessage}; salvage read failed: ${outcome.error}`);
+        return fail(`${promptFailure}; salvage read failed: ${outcome.error}`);
       }
       return {
         text: outcome.text,
