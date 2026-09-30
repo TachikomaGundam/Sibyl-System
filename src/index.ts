@@ -85,6 +85,34 @@ export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
           ...(r.error !== undefined && { error: r.error }),
         };
       },
+      async messages(args) {
+        const r = await sdk.session.messages({
+          path: { id: args.path.id },
+          query: { directory: args.query.directory },
+        });
+        return {
+          ...(r.data !== undefined && {
+            data: r.data.map((m) => ({
+              info: {
+                ...(m.info.role !== undefined && { role: m.info.role }),
+                ...(m.info.role === "assistant" && {
+                  ...(m.info.providerID !== undefined && { providerID: m.info.providerID }),
+                  ...(m.info.modelID !== undefined && { modelID: m.info.modelID }),
+                  ...(m.info.time !== undefined && {
+                    time: { ...(m.info.time.completed !== undefined && { completed: m.info.time.completed }) },
+                  }),
+                  ...(m.info.error !== undefined && { error: m.info.error }),
+                }),
+              },
+              parts: m.parts.map((p) => ({
+                type: p.type,
+                ...("text" in p && p.text !== undefined && { text: p.text }),
+              })),
+            })),
+          }),
+          ...(r.error !== undefined && { error: r.error }),
+        };
+      },
     },
   };
 }
