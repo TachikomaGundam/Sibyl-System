@@ -39,6 +39,11 @@ export type PersonaRunResult = {
   stage?: string;
   /** Present only on failure — human-readable description. */
   error?: string;
+  /** Present only when the ballot was collected by SALVAGE after the client
+   * prompt-race expired (engine session finished within the salvage grace). */
+  salvaged?: boolean;
+  /** Present only when salvaged — ms the engine ran past the client budget. */
+  salvageExtraMs?: number;
 };
 
 /**
@@ -81,6 +86,33 @@ export type EngineClient = {
       };
       error?: unknown;
     }>;
+    /**
+     * Read-only message list used by the SALVAGE path (see salvageAfterPromptTimeout):
+     * when the blocking prompt call is still in flight past its race budget, the
+     * child session keeps running in the engine and may finish a valid reply
+     * moments later — salvage reads it from here instead of discarding it.
+     * OPTIONAL on purpose: mocks without it keep the pre-salvage behavior
+     * (timeout → fail), and the real adapter (src/index.ts toEngineClient) always
+     * supplies it. Only the FIELDS the salvage reads are typed; `info.role`
+     * discriminates whose message it is, `info.time.completed` is the
+     * engine-side completion stamp the salvage waits for.
+     */
+    messages?(args: {
+      path: { id: string };
+      query: { directory: string };
+    }): Promise<{
+      data?: {
+        info?: {
+          role?: string;
+          providerID?: string;
+          modelID?: string;
+          time?: { completed?: number };
+          error?: unknown;
+        };
+        parts?: { type: string; text?: string }[];
+      }[];
+      error?: unknown;
+    }>;
   };
 };
 
@@ -91,6 +123,12 @@ export type RunPersonaOptions = {
   model: { providerID: string; modelID: string };
   inputText: string;
   timeoutMs?: number;
+  /** Extra budget AFTER the prompt race expires, during which the still-live
+   * engine session is polled for the ballot it may finish (salvage). Default:
+   * one more timeoutMs. 0 disables salvage → pre-salvage fail-on-timeout. */
+  salvageMs?: number | undefined;
+  /** Poll interval of the salvage loop; tests shrink it, production default 5s. */
+  salvagePollMs?: number | undefined;
   /** Nest the child session under the CALLING session (L1 UI hygiene): the TUI
    * session picker lists only root sessions (`parentID: null` query), so a
    * parented voter/worker never clutters the human's top-level session list,
@@ -132,6 +170,61 @@ function describeError(e: unknown): string {
   } catch {
     return String(e);
   }
+}
+
+const DEFAULT_SALVAGE_POLL_MS = 5_000;
+
+type PromptResponse = Awaited<ReturnType<EngineClient["session"]["prompt"]>>;
+
+type SalvageOutcome =
+  | { kind: "ballot"; text: string; modelApplied: string | null }
+  | { kind: "error"; error: string };
+
+/**
+ * SALVAGE: the prompt race expired but the engine session is NOT cancelled —
+ * heavy ballots (multi-file audits under shared-GPU load) were measured
+ * finishing 500-700s while the client budget died at 240/480s, and three
+ * complete valid ballots were found already written to the DB after their
+ * runs had reported CANNOT_ANSWER (VideoGen SEATS-01, 2026-09-30). Poll the
+ * read-only message list until the last assistant message is terminal:
+ *   - info.error set      → the LLM itself failed: surface it as a failure.
+ *   - time.completed set  → real finished reply: return it as the ballot.
+ *   - grace exhausted     → null: caller keeps the ORIGINAL timeout error,
+ *     so quorum semantics are unchanged (salvage only stops discarding
+ *     work that provably completed; it never fabricates a vote).
+ */
+async function salvageAfterPromptTimeout(
+  client: EngineClient,
+  directory: string,
+  sessionID: string,
+  graceMs: number,
+  pollMs: number,
+): Promise<SalvageOutcome | null> {
+  const messages = client.session.messages;
+  if (!messages || graceMs <= 0) return null;
+  const t0 = Date.now();
+  while (Date.now() - t0 < graceMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const res = await messages.call(client.session, {
+      path: { id: sessionID },
+      query: { directory },
+    });
+    if (res.error !== undefined) return { kind: "error", error: describeError(res.error) };
+    const lastAssistant = (res.data ?? []).filter((m) => m.info?.role === "assistant").at(-1);
+    const info = lastAssistant?.info;
+    if (!info) continue;
+    if (info.error !== undefined) return { kind: "error", error: describeError(info.error) };
+    if (typeof info.time?.completed === "number") {
+      const text = (lastAssistant?.parts ?? [])
+        .filter((p) => p.type === "text" && typeof p.text === "string")
+        .map((p) => p.text as string)
+        .join("");
+      const modelApplied =
+        info.providerID && info.modelID ? `${info.providerID}/${info.modelID}` : null;
+      return { kind: "ballot", text, modelApplied };
+    }
+  }
+  return null;
 }
 
 /** Drive one child session; never throws, always returns a structured result. */
@@ -177,21 +270,49 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
     const tools = Object.fromEntries(
       (persona.disallowedTools ?? DEFAULT_DISALLOWED_TOOLS).map((name) => [name, false]),
     );
-    const prompted = await withTimeout(
-      client.session.prompt({
-        path: { id: sessionID },
-        body: {
-          model,
-          ...(persona.agent !== undefined && { agent: persona.agent }),
-          ...(persona.system !== undefined && { system: persona.system }),
-          tools,
-          parts: [{ type: "text", text: inputText }],
-        },
-        query: { directory },
-      }),
-      remainingMs,
-      "session.prompt",
-    );
+    const raceExpiredAt = Date.now();
+    let prompted: PromptResponse;
+    try {
+      prompted = await withTimeout(
+        client.session.prompt({
+          path: { id: sessionID },
+          body: {
+            model,
+            ...(persona.agent !== undefined && { agent: persona.agent }),
+            ...(persona.system !== undefined && { system: persona.system }),
+            tools,
+            parts: [{ type: "text", text: inputText }],
+          },
+          query: { directory },
+        }),
+        remainingMs,
+        "session.prompt",
+      );
+    } catch (e) {
+      const timeoutMessage = e instanceof Error ? e.message : describeError(e);
+      if (!timeoutMessage.includes("timeout")) throw e;
+      const graceMs = opts.salvageMs ?? timeoutMs;
+      const outcome = await salvageAfterPromptTimeout(
+        client,
+        directory,
+        sessionID,
+        graceMs,
+        opts.salvagePollMs ?? DEFAULT_SALVAGE_POLL_MS,
+      );
+      if (!outcome) return fail(timeoutMessage);
+      if (outcome.kind === "error") {
+        return fail(`${timeoutMessage}; salvage read failed: ${outcome.error}`);
+      }
+      return {
+        text: outcome.text,
+        ok: true,
+        latencyMs: Date.now() - t0,
+        sessionID,
+        modelApplied: outcome.modelApplied,
+        salvaged: true,
+        salvageExtraMs: Date.now() - raceExpiredAt,
+      };
+    }
     if (prompted.error) return fail(describeError(prompted.error));
     if (!prompted.data) return fail("session.prompt: response missing data payload");
     const info = prompted.data.info;
