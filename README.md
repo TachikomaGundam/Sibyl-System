@@ -13,6 +13,16 @@ A standalone [opencode](https://opencode.ai) plugin with two capabilities:
 Zero coupling to team-mode or fleet orchestration: no `team_*` tools, no
 cross-agent message bus. Everything runs through plain opencode child sessions.
 
+## Session hygiene (L1)
+
+Council voters, swarm workers and the swarm judge run as **child sessions of the
+calling session** (`parentID` from the tool context): the TUI session picker
+lists root sessions only, so no sibyl ballot ever clutters your top-level
+session list. Transcripts stay in the DB, reachable from the parent session and
+mirrored into the run's sealed reply files. An empty caller session falls back
+to top-level creation. `sibyl_review` roles run fully isolated under /tmp with
+their own HOME/DB (`src/lane/isolated.ts`), never touching yours.
+
 ## v1.1 — the review chamber (民主集中制)
 
 `sibyl_review` + `sibyl-chamber` is a GENERAL review apparatus: any artifact

@@ -122,6 +122,8 @@ export type WriteDraftFn = (args: { taskId: string; workerId: string; text: stri
 export type DispatchOptions = {
   client: EngineClient;
   directory: string;
+  /** Nest worker sessions under the calling tool session (engine RunPersonaOptions.parentID). */
+  parentID?: string | undefined;
   /** How many tasks may run in parallel per wave. */
   concurrencyK: number;
   /** Launch-spacing within a wave (ms); tests inject a fake clock. */

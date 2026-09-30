@@ -17,7 +17,7 @@ import type { RunRecord } from "../src/state/index.ts";
 import { statusExecute } from "../src/tools/status.ts";
 import type { ToolContextLike, ToolDeps } from "../src/tools/shared.ts";
 
-const CTX: ToolContextLike = { directory: "/st", abort: new AbortController().signal };
+const CTX: ToolContextLike = { directory: "/st", abort: new AbortController().signal, sessionID: "ses_st" };
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-status-"));

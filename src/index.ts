@@ -40,7 +40,13 @@ export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
   return {
     session: {
       async create(args) {
-        const r = await sdk.session.create({ body: { title: args.body.title }, query: { directory: args.query.directory } });
+        const r = await sdk.session.create({
+          body: {
+            title: args.body.title,
+            ...(args.body.parentID !== undefined && { parentID: args.body.parentID }),
+          },
+          query: { directory: args.query.directory },
+        });
         return {
           ...(r.data !== undefined && { data: { id: r.data.id } }),
           ...(r.error !== undefined && { error: r.error }),

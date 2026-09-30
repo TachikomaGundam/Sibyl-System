@@ -54,10 +54,12 @@ type PromptRecord = {
 function councilClient(script: Record<string, Step[]>) {
   let created = 0;
   const prompts: PromptRecord[] = [];
+  const creates: { title: string; parentID?: string | undefined }[] = [];
   const client: EngineClient = {
     session: {
-      async create() {
+      async create(args) {
         created += 1;
+        creates.push(args.body);
         return { data: { id: `sess-${String(created)}` } };
       },
       async prompt(args) {
@@ -83,18 +85,18 @@ function councilClient(script: Record<string, Step[]>) {
       },
     },
   };
-  return { client, prompts };
+  return { client, prompts, creates };
 }
 
-async function fixture(overScript: Record<string, Step[]>, opts?: unknown): Promise<{ deps: ToolDeps; dir: string; prompts: PromptRecord[] }> {
+async function fixture(overScript: Record<string, Step[]>, opts?: unknown): Promise<{ deps: ToolDeps; dir: string; prompts: PromptRecord[]; creates: { title: string; parentID?: string | undefined }[] }> {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-consult-"));
-  const { client, prompts } = councilClient(overScript);
+  const { client, prompts, creates } = councilClient(overScript);
   const deps: ToolDeps = {
     client,
     store: new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") }),
     options: options({ timeoutMs: 10_000, ...((opts ?? {}) as Record<string, unknown>) }),
   };
-  return { deps, dir, prompts };
+  return { deps, dir, prompts, creates };
 }
 
 const ARTIFACT = "the module under audit\n(second line makes it inline)";
@@ -109,7 +111,7 @@ test("consult 2R/1A: fail-closed REJECT summary, done record, per-voter reply fi
     "sess-2": [{ text: BAL_APPROVE }],
     "sess-3": [{ text: CAS_REJECT }],
   });
-  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "ship safely" }, { directory: "/srv/work", abort: new AbortController().signal } satisfies ToolContextLike);
+  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "ship safely" }, { directory: "/srv/work", abort: new AbortController().signal, sessionID: "ses_caller" } satisfies ToolContextLike);
 
   assert.ok(out.startsWith("SIBYL CONSULT: REJECT (votes 1A/2R/0E/0M) run sibyl-"), out.slice(0, 80));
   assert.ok(out.includes("reason: melchior: correctness hole"), out);
@@ -143,7 +145,7 @@ test("consult repair: unparseable voter gets ONE in-session JSON-only follow-up"
     "sess-2": [{ text: "this looks fine to me tbh" }, { text: BAL_APPROVE }],
     "sess-3": [{ text: verdict("APPROVE", 0.6, "casper: worth it") }],
   });
-  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
+  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
   assert.ok(out.startsWith("SIBYL CONSULT: APPROVE (votes 2A/1R/0E/0M)"), out.slice(0, 60));
   assert.equal(prompts.length, 4); // 3 ballots + 1 repair
@@ -163,7 +165,7 @@ test("consult repair failure: second garbage reply becomes an ERROR ballot, neve
     "sess-2": [{ text: "nope" }, { text: "still nope" }],
     "sess-3": [{ text: BAL_APPROVE }],
   });
-  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
+  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
   assert.ok(out.includes("verdict-unparseable"), out);
   assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 1A/1R/1E/0M)"), out.slice(0, 70));
@@ -179,7 +181,7 @@ test("consult engine failure: errored voter leaves the seat unanswered (2A+1E ->
     "sess-2": [{ text: BAL_APPROVE }],
     "sess-3": [{ text: verdict("APPROVE", 0.9, "casper: ships") }],
   });
-  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
+  const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
   assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 2A/0R/1E/0M)"), out.slice(0, 70));
   assert.ok(out.includes("MELCHIOR errored"), out);
@@ -194,7 +196,7 @@ test("consult engine failure: errored voter leaves the seat unanswered (2A+1E ->
 
 test("consult artifact read failure: readable error string, NO run record created", async () => {
   const { deps } = await fixture({});
-  const ctx: ToolContextLike = { directory: "/nowhere", abort: new AbortController().signal };
+  const ctx: ToolContextLike = { directory: "/nowhere", abort: new AbortController().signal, sessionID: "ses_caller" };
   const out = await consultExecute(deps, { artifact: "ghost-file.md", goal: "g" }, ctx);
   assert.ok(out.startsWith("SIBYL consult: artifact"), out);
   assert.ok(out.includes("ghost-file.md"), out);
@@ -234,7 +236,7 @@ test("consult fans the three voters out concurrently (one shared Promise.all)", 
     options: options({ timeoutMs: 10_000 }),
   };
   const settled = await Promise.race([
-    consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: dir, abort: new AbortController().signal }).then(() => true),
+    consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: dir, abort: new AbortController().signal, sessionID: "ses_caller" }).then(() => true),
     new Promise<false>((r) => setTimeout(() => r(false), 4_000)),
   ]);
   assert.equal(settled, true, "if voters were serialized the latch never opens and this times out");
@@ -253,9 +255,35 @@ test("consult slot routing: voter override -> persona slot -> pool default", asy
       modelPool: { default: M, melchior: M2, fastlane: { providerID: "pf", modelID: "mf" } },
     },
   );
-  await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal });
+  await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
   const bySession = new Map(prompts.map((p) => [p.id, p.model]));
   assert.deepEqual(bySession.get("sess-1"), { providerID: "pf", modelID: "mf" }); // voters override slot
   assert.deepEqual(bySession.get("sess-2"), M); // unknown slot -> pool default, never fatal
   assert.deepEqual(bySession.get("sess-3"), M); // no override, no "casper" pool entry -> default
+});
+
+// --- L1 UI hygiene (parentID nesting): voter sessions must NOT appear in the
+// human's TUI root list (the picker queries parentID:null) — they nest under
+// the calling session instead, transcripts intact.
+
+test("consult nests all three voter sessions under the caller sessionID", async () => {
+  const { deps, creates } = await fixture({
+    "sess-1": [{ text: MEL_REJECT }],
+    "sess-2": [{ text: BAL_APPROVE }],
+    "sess-3": [{ text: CAS_REJECT }],
+  });
+  await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", sessionID: "ses_caller", abort: new AbortController().signal });
+  assert.equal(creates.length, 3);
+  assert.deepEqual(creates.map((c) => c.parentID), ["ses_caller", "ses_caller", "ses_caller"]);
+});
+
+test("consult with empty caller sessionID creates unparented ballots (no parentID key)", async () => {
+  const { deps, creates } = await fixture({
+    "sess-1": [{ text: MEL_REJECT }],
+    "sess-2": [{ text: BAL_APPROVE }],
+    "sess-3": [{ text: CAS_REJECT }],
+  });
+  await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", sessionID: "", abort: new AbortController().signal });
+  assert.equal(creates.length, 3);
+  for (const c of creates) assert.equal("parentID" in c, false);
 });

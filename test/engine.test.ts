@@ -48,7 +48,7 @@ type Script = {
 
 /** Build an EngineClient whose per-call behavior is scripted; records every call. */
 function scriptedClient(script: Script) {
-  const calls = { create: [] as { body: { title: string }; query: { directory: string } }[], prompt: [] as PromptArgs[] };
+  const calls = { create: [] as { body: { title: string; parentID?: string | undefined }; query: { directory: string } }[], prompt: [] as PromptArgs[] };
   const client: EngineClient = {
     session: {
       async create(args) {
@@ -265,4 +265,19 @@ test("EngineClient accepts a generic SDK-shaped client structurally (no as any)"
   const client: EngineClient = sdkShaped;
   assert.equal(typeof client.session.create, "function");
   assert.equal(typeof client.session.prompt, "function");
+});
+test("parentID: non-empty parentID threads into the create body", async () => {
+  const { client, calls } = scriptedClient({});
+  const result = await runPersona({ ...baseOpts(client), parentID: "ses_caller" });
+  assert.equal(result.ok, true);
+  assert.equal(calls.create[0]!.body.parentID, "ses_caller");
+});
+
+test("parentID guard: omitted or empty parentID leaves NO parentID key (top-level fallback)", async () => {
+  const { client, calls } = scriptedClient({});
+  await runPersona({ ...baseOpts(client) });
+  await runPersona({ ...baseOpts(client), parentID: "" });
+  assert.equal(calls.create.length, 2);
+  assert.equal("parentID" in calls.create[0]!.body, false);
+  assert.equal("parentID" in calls.create[1]!.body, false);
 });

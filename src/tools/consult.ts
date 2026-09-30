@@ -67,6 +67,7 @@ type VoteJob = {
   goal: string;
   artifactText: string;
   id: CouncilorId;
+  parentID: string;
 };
 
 /**
@@ -77,7 +78,7 @@ type VoteJob = {
  */
 async function castVote(job: VoteJob): Promise<VoterOutcome> {
   const { deps, id } = job;
-  const { directory, spaceDir, goal, artifactText } = job;
+  const { directory, spaceDir, goal, artifactText, parentID } = job;
   const { client, options } = deps;
   const persona = PERSONAS[id];
   const model = slotForModel(options.modelPool, options.voters[id], persona.modelSlot);
@@ -90,6 +91,7 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
     model,
     inputText: buildConsultInput(goal, artifactText),
     timeoutMs: options.timeoutMs,
+    parentID,
   });
 
   if (!result.ok) {
@@ -177,7 +179,7 @@ export async function consultExecute(
 
   const outcomes = await Promise.all(
     COUNCILORS.map((id): Promise<VoterOutcome> =>
-      castVote({ deps, directory: context.directory, spaceDir: record.spaceDir, goal: args.goal, artifactText: read.text, id }),
+      castVote({ deps, directory: context.directory, spaceDir: record.spaceDir, goal: args.goal, artifactText: read.text, id, parentID: context.sessionID }),
     ),
   );
 
