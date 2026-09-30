@@ -19,13 +19,14 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import SibylPlugin, { toEngineClient } from "../src/index.ts";
 import type { EngineClient } from "../src/engine/index.ts";
 
-type Handler = (args: { body: { title: string } } | { body: unknown }) => unknown;
+type Handler = (args: { body: { title: string } } | { body: unknown } | { path: { id: string } }) => unknown;
 
 function fakeSdkClient(handlers: {
   create?: Handler;
   prompt?: Handler;
+  messages?: Handler;
 }) {
-  const calls: { create: unknown[]; prompt: unknown[] } = { create: [], prompt: [] };
+  const calls: { create: unknown[]; prompt: unknown[]; messages: unknown[] } = { create: [], prompt: [], messages: [] };
   const sdk = {
     session: {
       create: (args: { body: { title: string } }) => {
@@ -42,6 +43,20 @@ function fakeSdkClient(handlers: {
           handlers.prompt === undefined
             ? { data: { info: { providerID: "p", modelID: "m", error: undefined }, parts: [{ type: "text", text: "hi", id: "pt1", sessionID: "sdk-1" }] }, error: undefined, response: {}, request: {} }
             : (handlers.prompt(args) as object),
+        );
+      },
+      messages: (args: { path: { id: string } }) => {
+        calls.messages.push(args);
+        return Promise.resolve(
+          handlers.messages === undefined
+            ? {
+                data: [
+                  { info: { role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "q", id: "p0", sessionID: "sdk-1" }] },
+                  { info: { role: "assistant", providerID: "p", modelID: "m", time: { created: 2, completed: 3 }, error: undefined, sessionID: "sdk-1" }, parts: [{ type: "text", text: "ballot", id: "p1", sessionID: "sdk-1" }] },
+                ],
+                error: undefined, response: {}, request: {},
+              }
+            : (handlers.messages(args) as object),
         );
       },
     },
@@ -164,6 +179,27 @@ test("toEngineClient: unions with required undefined arms normalize to EngineCli
   });
   const failed = await toEngineClient(errSdk).session.create({ body: { title: "x" }, query: { directory: "/d" } });
   assert.deepEqual(failed, { error: { name: "ApiError" } }); // data arm absent, error surfaced
+});
+
+test("toEngineClient.messages: strips union noise, keeps salvage fields, user arm stays role-only", async () => {
+  const { sdk, calls } = fakeSdkClient({});
+  const client: EngineClient = toEngineClient(sdk);
+  const res = await client.session.messages!({ path: { id: "sdk-1" }, query: { directory: "/d" } });
+    const msgs = res.data!;
+  assert.equal(msgs.length, 2);
+  const user = msgs[0]!;
+  const assistant = msgs[1]!;
+  assert.deepEqual(user.info, { role: "user" }); // user arm: role only
+  assert.deepEqual(user.parts, [{ type: "text", text: "q" }]);
+  assert.deepEqual(assistant.info, { role: "assistant", providerID: "p", modelID: "m", time: { completed: 3 } }); // error:undefined stripped, time.created stripped
+  assert.deepEqual(assistant.parts, [{ type: "text", text: "ballot" }]); // part id/sessionID stripped
+  assert.deepEqual(calls.messages[0], { path: { id: "sdk-1" }, query: { directory: "/d" } });
+
+  const { sdk: errSdk } = fakeSdkClient({
+    messages: () => ({ data: undefined, error: { name: "ApiError" }, response: {}, request: {} }),
+  });
+  const failed = await toEngineClient(errSdk).session.messages!({ path: { id: "s" }, query: { directory: "/d" } });
+  assert.deepEqual(failed, { error: { name: "ApiError" } });
 });
 
 test("grep gate: zero team-mode / oh-my-openagent references anywhere under src/", async () => {
