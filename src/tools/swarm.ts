@@ -192,21 +192,27 @@ export async function swarmExecute(
   }
 
   const counts = countTasks(report.tasks);
+  // Ballot honesty (the 20260929 miscount class, swarm-side twin of the
+  // consult.ts "absence is not a REJECT vote" rule): engine-failed tasks cast
+  // NO vote. Zero completed tasks = no signal -> CANNOT_ANSWER, never a
+  // verdict on the artifact. Fail-closed kept: APPROVE still requires all done.
+  const noSignal = counts.done === 0;
+  const tag = noSignal ? "CANNOT_ANSWER" : report.verdict === "APPROVE" ? "APPROVE" : "REJECT";
   await finishRun(deps, record, {
     status: "done",
     rounds: report.rounds,
     verdict: {
-      verdict: report.verdict === "APPROVE" ? "APPROVE" : "REJECT",
+      verdict: tag,
       approvals: counts.done,
-      rejects: counts.failed,
-      errors: 0,
+      rejects: noSignal ? 0 : tag === "REJECT" ? 1 : 0,
+      errors: counts.failed,
       missing: counts.suspended,
     },
-    notes: `${judgeNote} · ${report.tasks.map((t) => `${t.id}=${t.status}`).join(",")}`,
+    notes: `${judgeNote}${noSignal ? " · zero drafts produced: instrument failure, not a verdict on the artifact" : ""} · ${report.tasks.map((t) => `${t.id}=${t.status}`).join(",")}`,
   });
 
   const lines = [
-    `SIBYL SWARM: ${report.verdict} run ${record.runId} (rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
+    `SIBYL SWARM: ${tag} run ${record.runId} (rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
     ...report.tasks.map((t) => `  task: ${t.id} ${t.status}${t.sessionId === undefined ? "" : ` session=${t.sessionId}`}`),
     ...report.artifacts.map((a) => `  artifact: ${a}`),
     `  space: ${record.spaceDir}`,
