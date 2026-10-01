@@ -99,6 +99,19 @@ test("parseLedgerLine: schema-invalid single docs are refused with a reason", ()
   assert.ok(!parseLedgerLine("   ").ok);
 });
 
+test("parseLedgerLine: E4-deny seats with modelId '' keep their ledger row (2026-10-01 DROPPED regression)", () => {
+  const denied = {
+    ...baseRecord("/tmp/x"),
+    roster: [
+      { role: "evidence", slot: "default", modelId: "", policyCheck: "deny", denyReason: 'slot "default" is an empty placeholder (/)' },
+      { role: "judge", slot: "default", modelId: "", policyCheck: "deny", denyReason: "judge draw denied: empty judge pool" },
+    ],
+  };
+  assert.ok(parseLedgerLine(JSON.stringify(denied)).ok, "denied-roster lines must survive validation");
+  const badAllow = { ...baseRecord("/tmp/x"), roster: [{ role: "pro", slot: "default", modelId: "", policyCheck: "allow" }] };
+  assert.ok(!parseLedgerLine(JSON.stringify(badAllow)).ok, "allow rows still require a model id");
+});
+
 test("appendLedgerRow: EOF append, serials increment, corrupt lines still consume serials", async () => {
   const dir = await tmp("ledger");
   const ledgerPath = join(dir, "chamber-ledger.jsonl");
