@@ -158,7 +158,7 @@ test("swarm plan failure: structured plan error -> run marked failed after ONE f
   assert.ok(run.notes !== undefined && run.notes.startsWith("plan:"), run.notes);
 });
 
-test("swarm worker failure cascade: exhausted retries fail the task, dependent blocked, derived REJECT", async () => {
+test("swarm worker failure cascade: exhausted retries fail the task, dependent blocked, no-signal CANNOT_ANSWER", async () => {
   const { deps, ctx, store, createCount } = await fixture({
     "sess-1": [{ text: SCHEMA }],
     "sess-2": [{ error: "worker exploded" }], // t1 attempt 1 — each attempt gets a fresh session
@@ -167,7 +167,7 @@ test("swarm worker failure cascade: exhausted retries fail the task, dependent b
   });
   const out = await swarmExecute(deps, { artifact: "a\nb", goal: "g" }, ctx);
 
-  assert.ok(out.startsWith("SIBYL SWARM: REJECT"), out.slice(0, 40));
+  assert.ok(out.startsWith("SIBYL SWARM: CANNOT_ANSWER"), out.slice(0, 40)); // zero drafts = no verdict, not dissent
   assert.ok(out.includes("done=0 failed=2 suspended=0"), out);
   assert.ok(out.includes("task: t1 failed"), out);
   assert.ok(out.includes("task: t2 failed"), out);
@@ -175,7 +175,8 @@ test("swarm worker failure cascade: exhausted retries fail the task, dependent b
 
   const run = await oneRun(store);
   assert.equal(run.status, "done"); // pipeline completed; the VERDICT carries the failure
-  assert.deepEqual(run.verdict, { verdict: "REJECT", approvals: 0, rejects: 2, errors: 0, missing: 0 });
+  assert.deepEqual(run.verdict, { verdict: "CANNOT_ANSWER", approvals: 0, rejects: 0, errors: 2, missing: 0 });
+  assert.ok(run.notes !== undefined && run.notes.includes("instrument failure, not a verdict"), run.notes);
 });
 
 // --- L1 UI hygiene: EVERY swarm child (architect, workers, judge) nests under
