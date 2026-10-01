@@ -133,10 +133,16 @@ function asStringArray(v: unknown): string[] | null {
 function isRosterRef(v: unknown): v is RosterRef {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
+  // E4-deny seats carry modelId:"" BY DESIGN (protocol.ts roster build) —
+  // demanding a non-empty id here made denied runs' own ledger lines fail
+  // validation and get DROPPED (observed 2026-10-01, status CLI "line 14
+  // DROPPED"). allow rows keep the non-empty requirement.
+  const modelOk =
+    o["policyCheck"] === "deny" ? typeof o["modelId"] === "string" : isNonEmptyString(o["modelId"]);
   return (
     isNonEmptyString(o["role"]) &&
     isNonEmptyString(o["slot"]) &&
-    isNonEmptyString(o["modelId"]) &&
+    modelOk &&
     (o["policyCheck"] === "allow" || o["policyCheck"] === "deny") &&
     (o["denyReason"] === undefined || typeof o["denyReason"] === "string")
   );
