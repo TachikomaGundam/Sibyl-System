@@ -22,6 +22,7 @@ import { parseOptions } from "./options.ts";
 import { RunStore } from "./state/index.ts";
 import { buildConsultTool } from "./tools/consult.ts";
 import { buildReviewTool } from "./tools/review.ts";
+import { buildAnchorTool } from "./tools/anchor.ts";
 import { buildStatusTool } from "./tools/status.ts";
 import { buildSwarmTool } from "./tools/swarm.ts";
 import type { ToolDeps } from "./tools/shared.ts";
@@ -142,6 +143,7 @@ export default async function SibylPlugin(
       sibyl_swarm: buildSwarmTool(deps),
       sibyl_status: buildStatusTool(deps),
       sibyl_review: buildReviewTool(deps),
+      sibyl_anchor_check: buildAnchorTool(deps),
     },
   };
 }

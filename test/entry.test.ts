@@ -67,11 +67,11 @@ function fakeSdkClient(handlers: {
 const fakeInput = (client: PluginInput["client"]): PluginInput =>
   ({ client, directory: "/proj", worktree: "/proj", project: { id: "pr" } }) as unknown as PluginInput;
 
-test("entry registers exactly sibyl_consult, sibyl_swarm, sibyl_status — no placeholder", async () => {
+test("entry registers the full tool surface incl. sibyl_anchor_check — no placeholder", async () => {
   const { sdk } = fakeSdkClient({});
   const hooks = await SibylPlugin(fakeInput(sdk), undefined);
   const names = Object.keys(hooks.tool ?? {}).sort();
-  assert.deepEqual(names, ["sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
+  assert.deepEqual(names, ["sibyl_anchor_check", "sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
   const consult = hooks.tool?.["sibyl_consult"];
   assert.ok(consult !== undefined && typeof consult.execute === "function" && typeof consult.description === "string");
   assert.deepEqual(Object.keys(consult.args).sort(), ["artifact", "goal"]);
@@ -129,7 +129,7 @@ test("entry: direct top-level options reach the schema (maxRounds:2 registers th
   const { sdk } = fakeSdkClient({});
   const hooks = await SibylPlugin(fakeInput(sdk), { maxRounds: 2 });
   const names = Object.keys(hooks.tool ?? {}).sort();
-  assert.deepEqual(names, ["sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
+  assert.deepEqual(names, ["sibyl_anchor_check", "sibyl_consult", "sibyl_review", "sibyl_status", "sibyl_swarm"]);
 });
 
 test("entry: SIBYL_STATE_FILE seam reaches the store used by the registered tools", async () => {
