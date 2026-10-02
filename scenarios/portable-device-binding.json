@@ -24,7 +24,8 @@
       "kind": "disk",
       "path": "operator/release.env",
       "contains": "qwen3.7-plus",
-      "note": "the operator's value survives — de-pinning must PRESERVE capability via operator-local config, not delete the feature (fails-closed != fails-empty)"
+      "note": "the operator's value survives — de-pinning must PRESERVE capability via operator-local config, not delete the feature (fails-closed != fails-empty)",
+      "pattern": "operator/release[.]env"
     },
     {
       "id": "env-leg-actually-wired",
