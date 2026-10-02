@@ -82,3 +82,29 @@ test("negative index counts from the end", async () => {
   assert.match(out, /SIBYL ANCHOR MATCH/);
   assert.match(out, /messages=2/);
 });
+
+// ── 2026-10-02 locator hardening (ordinal-space finding + empty-canonical guard)
+test("body locator seals by unique canonical match regardless of ordinal space", async () => {
+  const out = await anchorExecute(mk([humanMsg]), { sessionId: "s", body: "同意", expectSha256: BODY_SHA }, ctx);
+  assert.match(out, /SIBYL ANCHOR MATCH/);
+  assert.match(out, /body@0/);
+});
+
+test("repeated body => ERROR naming candidates, never auto-pick", async () => {
+  const out = await anchorExecute(mk([humanMsg, humanMsg]), { sessionId: "s", body: "同意", expectSha256: BODY_SHA }, ctx);
+  assert.match(out, /ANCHOR ERROR — body locator/);
+  assert.match(out, /matches 2 messages/);
+});
+
+test("tag-only row is never vacuously MATCH-able (canonical empty guard)", async () => {
+  const tagOnly = { info: { role: "user" }, parts: [{ type: "text", text: "\n<dcp-message-id tokens=\"1\" type=\"text\">m9</dcp-message-id>" }] };
+  const emptySha = sha256("");
+  const out = await anchorExecute(mk([tagOnly]), { sessionId: "s", expectSha256: emptySha }, ctx);
+  assert.match(out, /SIBYL ANCHOR ABSENT/);
+});
+
+test("claim against canonical form matches when raw carries dcp tail", async () => {
+  const tagged = { info: { role: "user" }, parts: [{ type: "text", text: "同意\n<dcp-message-id tokens=\"1\" type=\"text\">m9</dcp-message-id>" }] };
+  const out = await anchorExecute(mk([tagged]), { sessionId: "s", expectSha256: BODY_SHA }, ctx);
+  assert.match(out, /SIBYL ANCHOR MATCH/);
+});
