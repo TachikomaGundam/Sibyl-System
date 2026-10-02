@@ -37,6 +37,15 @@ export function canonicalView(rows: MessageRow[]): string {
   );
 }
 
+/** Closed normalization list (mirrors historian anchor): trailing dcp tag block
+ * + outer whitespace ONLY. Anything else — including the engine merging several
+ * user turns into one row — is NOT normalized away. */
+export const NORMALIZATION_CLOSED_LIST = ["trailing <dcp-message-id…</dcp-message-id> block", "outer whitespace"] as const;
+
+export function canonicalText(raw: string): string {
+  return raw.replace(/\s*<dcp-message-id[^>]*>[\s\S]*?<\/dcp-message-id>\s*$/g, "").trim();
+}
+
 export function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -55,12 +64,17 @@ export function decide(
   if (expected === undefined) return { verdict: "ABSENT", text: anchorText(row) }; // no claim to check
   const text = anchorText(row);
   const normalized = expected.trim().toLowerCase();
-  return { verdict: sha256(text) === normalized ? "MATCH" : "MISMATCH", text };
+  // 2026-10-02 finding: a tag-only row canonicalizes to "" — claiming that empty
+  // body is vacuously MATCH-able; it must come back UNVERIFIABLE-style ABSENT.
+  if (canonicalText(text) === "") return { verdict: "ABSENT", text };
+  const okRaw = sha256(text) === normalized;
+  const okCanon = sha256(canonicalText(text)) === normalized;
+  return { verdict: okRaw || okCanon ? "MATCH" : "MISMATCH", text };
 }
 
 export async function anchorExecute(
   deps: ToolDeps,
-  args: { sessionId: string; index?: number | undefined; expectSha256?: string | undefined; label?: string | undefined },
+  args: { sessionId: string; index?: number | undefined; body?: string | undefined; expectSha256?: string | undefined; label?: string | undefined },
   context: ToolContextLike,
 ): Promise<string> {
   const messages = deps.client.session.messages;
@@ -83,15 +97,33 @@ export async function anchorExecute(
   } catch (e) {
     return internalError("sibyl_anchor_check", e);
   }
-  const idx = args.index ?? -1;
-  const row = idx >= 0 ? rows[idx] : rows[rows.length + idx];
+  let row: MessageRow | undefined;
+  let locatedBy: string;
+  if (args.body !== undefined) {
+    const want = canonicalText(args.body);
+    const hits = rows.map((r, i) => ({ r, i })).filter(({ r }) => canonicalText(anchorText(r)) === want);
+    if (hits.length !== 1) {
+      return [
+        `SIBYL ANCHOR ${hits.length === 0 ? "ABSENT" : "ERROR"} — body locator`,
+        hits.length === 0 ? `no message's canonical text equals the claimed body (scanned ${rows.length}).` : `body matches ${hits.length} messages at sdk-ordinals ${hits.map((h) => h.i).join(",")} — never auto-pick; re-run with an explicit index.`,
+        `view_sha256=${sha256(canonicalView(rows))}`,
+      ].join("\n");
+    }
+    row = hits[0]!.r;
+    locatedBy = `body@${hits[0]!.i}`;
+  } else {
+    const idx = args.index ?? -1;
+    row = idx >= 0 ? rows[idx] : rows[rows.length + idx];
+    locatedBy = `index=${idx}`;
+  }
+  void locatedBy;
   const claim = args.expectSha256 !== undefined;
   const { verdict, text } = claim ? decide(row, args.expectSha256) : { verdict: "ABSENT" as AnchorVerdict, text: row ? anchorText(row) : "" };
   const finalVerdict: AnchorVerdict = !claim ? (row === undefined ? "ABSENT" : "ERROR") : verdict;
   // Without a claim there is nothing to verify — honest cannot-answer, not a dump.
   const receipt = [
     `SIBYL ANCHOR ${finalVerdict}`,
-    `session=${args.sessionId} index=${idx} messages=${rows.length} role=${row?.info?.role ?? "-"}`,
+    `session=${args.sessionId} ${locatedBy} messages=${rows.length} role=${row?.info?.role ?? "-"}`,
     args.label !== undefined ? `label=${args.label}` : "",
     `anchor_sha256=${row === undefined ? "-" : sha256(anchorText(row))}`,
     `claim_sha256=${args.expectSha256 ?? "-"}`,
@@ -110,7 +142,8 @@ export function buildAnchorTool(deps: ToolDeps) {
       "view-hash receipt so the read itself is re-computable. Read-only; persists nothing.",
     args: {
       sessionId: tool.schema.string().min(1).describe("Engine session id that allegedly contains the human message."),
-      index: tool.schema.number().int().optional().describe("Message ordinal in the session (0-based; negative counts from the end). Default: last message."),
+      index: tool.schema.number().int().optional().describe("Message ordinal in the SDK messages view (0-based; negative counts from the end; default last). WARNING: this ordinal space differs from the raw message table — cross-tool identity is the body hash, not the ordinal."),
+      body: tool.schema.string().min(1).optional().describe("Claimed exact body text — located by unique canonical match (closed normalization: trailing dcp tag + trim). Repeated bodies return ERROR naming candidates, never auto-picked."),
       expectSha256: tool.schema.string().min(64).max(64).optional().describe("Claimed sha256 (hex) of the anchor body text; omitting it yields a non-verdict."),
       label: tool.schema.string().min(1).optional().describe("Free-form label echoed into the receipt (e.g. the order being ratified)."),
     },
