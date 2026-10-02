@@ -27,7 +27,11 @@ test("shipped canary scenarios all validate (data-driven exam bank)", async () =
   assert.ok(names.length >= 3, "expected at least the 3 ported canaries");
   for (const n of names) {
     const sc = await loadScenario(n.replace(".json", ""));
-    assert.equal(sc.canary, true, `${n} is a canary item`);
+    if (n.startsWith("canary-")) {
+      assert.equal(sc.canary, true, `${n} is named canary-* but not flagged canary`);
+    } else {
+      assert.equal(typeof sc.canary, "boolean", `${n} must declare canary explicitly`);
+    }
   }
 });
 
