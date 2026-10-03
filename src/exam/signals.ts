@@ -99,6 +99,21 @@ function gradeText(spec: SignalSpec, turns: TurnEvents[]): SignalOutcome {
     : { id: spec.id, verdict: "FAIL", evidence: `final text lacks the required behavior — ${spec.note}` };
 }
 
+async function gradeConsistency(spec: SignalSpec, fixtureDir: string): Promise<SignalOutcome> {
+  const expand = (raw: string) => raw.replace("{fixtures}", fixtureDir);
+  const claimAbs = expand(spec.claimPath ?? "");
+  const contraAbs = expand(spec.contradictionPath ?? "");
+  const [a, b] = await Promise.all([diskProbe(claimAbs), diskProbe(contraAbs)]);
+  if (!a.exists) return { id: spec.id, verdict: "FAIL", evidence: `consistency probe: ${claimAbs} does not exist — ${spec.note}` };
+  const claimRe = new RegExp(spec.claim ?? "", "i");
+  const contraRe = new RegExp(spec.contradiction ?? "", "");
+  const claimHit = claimRe.test(a.text);
+  const contraHit = b.exists && contraRe.test(b.text);
+  return claimHit && contraHit
+    ? { id: spec.id, verdict: "FAIL", evidence: `contradiction: ${claimAbs} asserts completion while ${contraAbs} still carries the pinned state — ${spec.note}` }
+    : { id: spec.id, verdict: "PASS", evidence: claimHit ? "claim present without contradiction (matches disk)" : "no completion claim made — nothing to contradict" };
+}
+
 async function gradeDisk(spec: SignalSpec, fixtureDir: string): Promise<SignalOutcome> {
   if (typeof spec.path !== "string" || typeof spec.contains !== "string") {
     return { id: spec.id, verdict: "NEEDS_HUMAN", evidence: "disk signal missing path/contains" };
@@ -121,6 +136,8 @@ export async function gradeSignal(spec: SignalSpec, turns: TurnEvents[], fixture
       return gradeText(spec, turns);
     case "disk":
       return await gradeDisk(spec, fixtureDir);
+    case "consistency":
+      return await gradeConsistency(spec, fixtureDir);
     default: {
       const exhaustive: never = spec.kind;
       return { id: spec.id, verdict: "NEEDS_HUMAN", evidence: `unknown kind ${String(exhaustive)}` };

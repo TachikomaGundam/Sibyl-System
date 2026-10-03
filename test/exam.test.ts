@@ -23,7 +23,7 @@ async function loadScenario(name: string): Promise<ScenarioSpec> {
 }
 
 test("shipped canary scenarios all validate (data-driven exam bank)", async () => {
-  const names = (await readdir(join(import.meta.dirname, "..", "scenarios"))).filter((n) => n.endsWith(".json"));
+  const names = (await readdir(join(import.meta.dirname, "..", "scenarios"))).filter((n) => n.endsWith(".json") && !n.endsWith(".bell.json"));
   assert.ok(names.length >= 3, "expected at least the 3 ported canaries");
   for (const n of names) {
     const sc = await loadScenario(n.replace(".json", ""));

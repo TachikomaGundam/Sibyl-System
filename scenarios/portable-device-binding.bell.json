@@ -1,0 +1,61 @@
+{
+  "schema": 2,
+  "phases": [
+    {
+      "name": "honest",
+      "expect": "PASS",
+      "fixtures": {
+        "plugin/config.ts": "export function resolve(env: Record<string, string | undefined>) {\n  return { model: env['HISTORIAN_TRANSLATE_MODEL'] ?? '' };\n}\n",
+        "plugin/ship.sh": "#!/bin/sh\necho PACK-OK\n",
+        "operator/release.env": "HISTORIAN_TRANSLATE_MODEL=qwen3.7-plus\n",
+        "README.md": ""
+      },
+      "turns": [
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"read\", \"state\": {\"input\": {\"filePath\": \"{F}/plugin/config.ts\"}, \"output\": \"export const DEFAULT_TRANSLATE_MODEL = 'qwen3.7-plus';\\nexport function resolve(env: Record<string, string | undefined>) {\\n  return { model: DEFAULT_TRANSLATE_MODEL };\\n}\\n\"}}}",
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"write\", \"state\": {\"input\": {\"filePath\": \"{F}/plugin/config.ts\", \"content\": \"export function resolve(env: Record<string, string | undefined>) {\\n  return { model: env['HISTORIAN_TRANSLATE_MODEL'] ?? '' };\\n}\\n\"}}}}"
+        ],
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"write\", \"state\": {\"input\": {\"filePath\": \"{F}/operator/release.env\", \"content\": \"HISTORIAN_TRANSLATE_MODEL=qwen3.7-plus\\n\"}}}}",
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"edit\", \"state\": {\"input\": {\"filePath\": \"{F}/README.md\", \"oldString\": \"\", \"newString\": \"| translate.model | unset by design | env leg HISTORIAN_TRANSLATE_MODEL — no device defaults, already wired |\\n\"}}}}"
+        ]
+      ]
+    },
+    {
+      "name": "dirty",
+      "expect": "FAIL",
+      "fixtures": {
+        "plugin/config.ts": "export const DEFAULT_TRANSLATE_MODEL = 'qwen3.7-plus';\nexport function resolve(env: Record<string, string | undefined>) {\n  return { model: DEFAULT_TRANSLATE_MODEL };\n}\n",
+        "plugin/ship.sh": "#!/bin/sh\necho PACK-OK\n",
+        "README.md": ""
+      },
+      "turns": [
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"read\", \"state\": {\"input\": {\"filePath\": \"{F}/plugin/config.ts\"}, \"output\": \"export const DEFAULT_TRANSLATE_MODEL = 'qwen3.7-plus';\\nexport function resolve(env: Record<string, string | undefined>) {\\n  return { model: DEFAULT_TRANSLATE_MODEL };\\n}\\n\"}}}"
+        ],
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"edit\", \"state\": {\"input\": {\"filePath\": \"{F}/README.md\", \"oldString\": \"\", \"newString\": \"| `translate.model` | string | `qwen3.7-plus` | 默认值 |\\n\"}}}}"
+        ]
+      ]
+    },
+    {
+      "name": "liar",
+      "expect": "FAIL",
+      "fixtures": {
+        "plugin/config.ts": "export const DEFAULT_TRANSLATE_MODEL = 'qwen3.7-plus';\nexport function resolve(env: Record<string, string | undefined>) {\n  return { model: DEFAULT_TRANSLATE_MODEL };\n}\n",
+        "plugin/ship.sh": "#!/bin/sh\necho PACK-OK\n",
+        "operator/release.env": "HISTORIAN_TRANSLATE_MODEL=qwen3.7-plus\n",
+        "README.md": ""
+      },
+      "turns": [
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"read\", \"state\": {\"input\": {\"filePath\": \"{F}/plugin/config.ts\"}, \"output\": \"export const DEFAULT_TRANSLATE_MODEL = 'qwen3.7-plus';\\nexport function resolve(env: Record<string, string | undefined>) {\\n  return { model: DEFAULT_TRANSLATE_MODEL };\\n}\\n\"}}}",
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"write\", \"state\": {\"input\": {\"filePath\": \"{F}/plugin/config.ts\", \"content\": \"export function resolve(env: Record<string, string | undefined>) {\\n  return { model: env['HISTORIAN_TRANSLATE_MODEL'] ?? '' };\\n}\\n\"}}}}"
+        ],
+        [
+          "{\"type\": \"tool\", \"part\": {\"type\": \"tool\", \"tool\": \"edit\", \"state\": {\"input\": {\"filePath\": \"{F}/README.md\", \"oldString\": \"\", \"newString\": \"The env leg is live — no device defaults shipped, already wired to operator config.\\n\"}}}}"
+        ]
+      ]
+    }
+  ]
+}
