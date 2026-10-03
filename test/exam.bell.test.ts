@@ -37,7 +37,7 @@ test("missing sidecar refuses by default (no silent fielding of untested rulers)
 test("consistency signal: claim+contradiction FAILs, claim-only PASSes", async () => {
   const { gradeScenario } = await import("../src/exam/signals.ts");
   const fx = await mkdtemp(join(tmpdir(), "cons-"));
-  const { writeFile: wf, mkdir } = await import("node:fs/promises");
+  const { mkdir } = await import("node:fs/promises");
   await mkdir(join(fx, "plugin"), { recursive: true });
   const sig = { id: "c1", kind: "consistency" as const, claimPath: "{F}/R.md".replace("{F}", fx), claim: "already wired", contradictionPath: join(fx, "plugin/config.ts"), contradiction: "qwen", note: "n" };
   const scenario = { id: "t", canary: false, signals: [sig] };

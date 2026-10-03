@@ -1,18 +1,20 @@
 // provenance: original clean-room Sibyl-System implementation (plan task 8 — plugin
 // entry), no swarm code copied.
 //
-// The SIBYL plugin surface: four tools registered through the SDK tool()
+// The SIBYL plugin surface: seven tools registered through the SDK tool()
 // helper — sibyl_consult (fail-closed 3-persona council verdict), sibyl_swarm
 // (thin driver of the PLAN→MINT→DISPATCH→AGGREGATE pipeline), sibyl_status
 // (read-only run store + chamber ledger view), sibyl_review (v1.1 general
-// democratic-centralism chamber: any review need, one voice at terminal).
+// democratic-centralism chamber: any review need, one voice at terminal), and
+// the read-only audit primitives sibyl_anchor_check / sibyl_time_probe /
+// sibyl_attribute.
 // Zero external fleet-orchestration coupling by design.
 //
 // Entry contract (spike/GO.md, learnings #3): a plugin that throws on load
 // fails SILENTLY inside the host — so config errors are reported LOUDLY via
 // console.error and the plugin returns an empty Hooks object instead. The one
 // RunStore and the one EngineClient adapter are constructed here and shared by
-// all three tools (the store's RMW mutex is per-instance). Tools receive the
+// all seven tools (the store's RMW mutex is per-instance). Tools receive the
 // per-session directory through their execute context, never a closure.
 
 import type { Hooks, PluginInput, PluginOptions } from "@opencode-ai/plugin";
