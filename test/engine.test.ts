@@ -58,11 +58,12 @@ type Script = {
   create?: () => CreateResponse | Promise<CreateResponse>;
   prompt?: (args: PromptArgs) => PromptResponse | Promise<PromptResponse>;
   messages?: () => MessagesResponse | Promise<MessagesResponse>;
+  del?: () => { error?: unknown };
 };
 
 /** Build an EngineClient whose per-call behavior is scripted; records every call. */
 function scriptedClient(script: Script) {
-  const calls = { create: [] as { body: { title: string; parentID?: string | undefined }; query: { directory: string } }[], prompt: [] as PromptArgs[], messages: 0 };
+  const calls = { create: [] as { body: { title: string; parentID?: string | undefined }; query: { directory: string } }[], prompt: [] as PromptArgs[], messages: 0, deleted: [] as string[] };
   const client: EngineClient = {
     session: {
       async create(args) {
@@ -84,6 +85,12 @@ function scriptedClient(script: Script) {
         async messages() {
           calls.messages += 1;
           return script.messages!();
+        },
+      }),
+      ...(script.del && {
+        async delete(args: { path: { id: string } }) {
+          calls.deleted.push(args.path.id);
+          return script.del!();
         },
       }),
     },
@@ -418,6 +425,24 @@ test("EngineClient accepts a generic SDK-shaped client structurally (no as any)"
   const client: EngineClient = sdkShaped;
   assert.equal(typeof client.session.create, "function");
   assert.equal(typeof client.session.prompt, "function");
+});
+test("headless GC: parentless run deletes its session row after a successful ballot", async () => {
+  const { client, calls } = scriptedClient({ del: () => ({}) });
+  const result = await runPersona(baseOpts(client));
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.deleted, ["sess-test-1"]);
+});
+test("headless GC: nested runs keep their row (audit mirror) — delete not called", async () => {
+  const { client, calls } = scriptedClient({ del: () => ({}) });
+  const result = await runPersona({ ...baseOpts(client), parentID: "ses_caller" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls.deleted, []);
+});
+test("headless GC: failed votes are never deleted (salvage evidence preserved)", async () => {
+  const { client, calls } = scriptedClient({ prompt: () => ({ error: { name: "APIError" } }), del: () => ({}) });
+  const result = await runPersona(baseOpts(client));
+  assert.equal(result.ok, false);
+  assert.deepEqual(calls.deleted, []);
 });
 test("parentID: non-empty parentID threads into the create body", async () => {
   const { client, calls } = scriptedClient({});

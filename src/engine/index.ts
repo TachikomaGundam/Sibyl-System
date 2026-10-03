@@ -69,6 +69,7 @@ export type EngineClient = {
       body: { title: string; parentID?: string | undefined };
       query: { directory: string };
     }): Promise<{ data?: { id?: string }; error?: unknown }>;
+    delete?(args: { path: { id: string } }): Promise<{ error?: unknown }>;
     prompt(args: {
       path: { id: string };
       body: {
@@ -133,7 +134,8 @@ export type RunPersonaOptions = {
    * session picker lists only root sessions (`parentID: null` query), so a
    * parented voter/worker never clutters the human's top-level session list,
    * stays navigable from the parent, and its full transcript remains in the
-   * DB as evidence. Omitted or empty → top-level (pre-1.1.1 behavior). */
+   * DB as evidence. Omitted or empty → headless: top-level during the run,
+   * then GC'd on success (1.1.2) — a failed vote keeps its row for salvage. */
   parentID?: string | undefined;
 };
 
@@ -336,6 +338,20 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
       .filter((p): p is { type: "text"; text: string } => p.type === "text" && typeof p.text === "string")
       .map((p) => p.text)
       .join("");
+    // Headless GC (owner order 2026-10-03: picker pollution from CLI/seat-less
+    // voters): a run WITHOUT a calling session has no parent to hide under, so
+    // its mirror row is reclaimed after the ballot is in hand — the reply file
+    // in the run store is the durable record; the DB copy was never the trail.
+    // With parentID set, the row stays nested (audit mirror, invisible to the
+    // root picker). Failure paths never delete (evidence preserved for salvage).
+    const headless = parentID === undefined || parentID.length === 0;
+    if (headless && client.session.delete !== undefined) {
+      try {
+        await client.session.delete({ path: { id: sessionID } });
+      } catch {
+        // GC is best-effort: a failed delete leaves a stray row, never a lost vote.
+      }
+    }
     return { text, ok: true, latencyMs: Date.now() - t0, sessionID, modelApplied };
   } catch (e) {
     // Any unexpected throw (timeout rejection, broken client) is captured here:
