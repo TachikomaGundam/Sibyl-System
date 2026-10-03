@@ -67,14 +67,24 @@ try {
     errLines.find((l) => l.includes("config error")) ?? "no config error line",
   );
 
-  // 3. valid minimal options -> exactly the three sibyl_* tools
+  // 3. valid minimal options -> exactly the full shipped tool surface
+  // (canonical list mirrored from test/entry.test.ts — keep both in sync)
   const hooks = await mod.default(fakeInput(), {
     modelPool: { default: { providerID: "smoke", modelID: "smoke" } },
   });
+  const expected = [
+    "sibyl_anchor_check",
+    "sibyl_attribute",
+    "sibyl_consult",
+    "sibyl_review",
+    "sibyl_status",
+    "sibyl_swarm",
+    "sibyl_time_probe",
+  ];
   const toolNames = Object.keys(hooks.tool ?? {}).sort().join(",");
   check(
-    "valid options -> tools {sibyl_consult, sibyl_status, sibyl_swarm} exactly",
-    toolNames === "sibyl_consult,sibyl_status,sibyl_swarm",
+    `valid options -> tools {${expected.join(", ")}} exactly`,
+    toolNames === [...expected].sort().join(","),
     `got {${toolNames}}`,
   );
 
