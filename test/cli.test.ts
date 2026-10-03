@@ -128,3 +128,22 @@ test("reviewExecute error doors return strings, never throw, never spawn", async
   assert.match(badTarget, /SIBYL review:/);
   assert.match(badTarget, /ENOENT|no such file/);
 });
+
+// ── injury regression 2026-10-03: exam spawn died on empty opencodeBin
+test("resolveRun: opencodeBin defaults to PATH name, never empty", async () => {
+  const { parseCliArgs, resolveRun } = await import("../src/cli.ts");
+  const saved = process.env.OPENCODE_BIN;
+  delete process.env.OPENCODE_BIN;
+  try {
+    const f = parseCliArgs(["run", "--target", "-", "--goal", "g", "--profile", "exam", "--scenario", "scenarios/portable-device-binding.json", "--model", "p/m"]);
+    const r = await resolveRun(f.flags);
+    assert.ok(r.ok, "exam resolve must pass with the shipped scenario");
+    assert.equal((r as { run: { laneCfg: { opencodeBin: string } } }).run.laneCfg.opencodeBin, "opencode");
+    const f2 = parseCliArgs(["run", "--target", "-", "--goal", "g", "--profile", "exam", "--scenario", "scenarios/portable-device-binding.json", "--model", "p/m", "--opencode-bin", "/abs/opencode"]);
+    const r2 = await resolveRun(f2.flags);
+    assert.ok(r2.ok);
+    assert.equal((r2 as { run: { laneCfg: { opencodeBin: string } } }).run.laneCfg.opencodeBin, "/abs/opencode");
+  } finally {
+    if (saved !== undefined) process.env.OPENCODE_BIN = saved;
+  }
+});
