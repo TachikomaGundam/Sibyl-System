@@ -2,13 +2,18 @@
 
 [![npm version](https://img.shields.io/npm/v/sibyl-system.svg)](https://www.npmjs.com/package/sibyl-system) ![license MIT](https://img.shields.io/badge/license-MIT-green.svg)
 
-A standalone [opencode](https://opencode.ai) plugin with two capabilities:
+A standalone [opencode](https://opencode.ai) plugin:
 
 - **`sibyl_consult`** — a three-voter review council (MELCHIOR / BALTHASAR / CASPER)
   that audits an artifact against a goal and returns a **fail-closed 2/3 verdict**.
 - **`sibyl_swarm`** — a lightweight workflow swarm: an ARCHITECT persona plans a
   dependency-ordered task graph, deterministic workers execute it in waves, and
   the result is aggregated into a verdict.
+- **`sibyl_review` / `sibyl-chamber`** (v1.1) — a general review chamber with
+  isolated role sessions and one conclusion spoken in one voice (see below).
+- **`sibyl_status` + audit primitives** (`sibyl_anchor_check`, `sibyl_time_probe`,
+  `sibyl_attribute`) — read-only verification tools: run-store view, human-message
+  anchor re-verification, clock integrity, ref-move attribution.
 
 Zero coupling to team-mode or fleet orchestration: no `team_*` tools, no
 cross-agent message bus. Everything runs through plain opencode child sessions.
@@ -92,6 +97,9 @@ stderr, registers nothing, and returns empty hooks.
 | `sibyl_swarm` | `{ artifact, goal, judge? }` | ARCHITECT decomposes goal + artifact into a strict-JSON workflow schema; workers are minted deterministically and dispatched in dependency waves; drafts land in the run's space dir. Verdict: `APPROVE` / `REJECT` / `EXHAUSTED`. With `judge: true`, one extra judge pass may replace the derived verdict — an unrecognized or failed judge reply keeps the derived one. |
 | `sibyl_status` | `{ runId? }` | Read-only. Lists all recorded runs (newest last) + the last chamber-ledger rows, or shows one run's full record and space dir. |
 | `sibyl_review` | `{ target, goal, seed?, maxRounds? }` | v1.1 general democratic-centralism chamber: launches the isolated evidence→clash→judge pipeline detached and returns a receipt (explicitly NOT a verdict); the single voice lands in the run record at terminal state. CLI twin: `sibyl-chamber`. |
+| `sibyl_anchor_check` | `{ sessionId, index?, body?, expectSha256?, label? }` | Read-only verifier for "human anchor" claims (an order/approval message the owner says they sent): re-checks the claim against the engine's own session store instead of trusting a transcribed string. Closed 4-state verdict `MATCH` / `MISMATCH` / `ABSENT` / `ERROR`; the receipt carries a hash of the canonical view read, so later store mutation shows up as a view-hash difference. No `expectSha256` claim → non-verdict. |
+| `sibyl_time_probe` | `{ endpoints?, toleranceMs? }` | Clock-integrity check against independent HTTP `Date` headers (default pool: cloudflare / google / mozilla; sources with the same owner dept collapse to ONE source). Verdict: `SYNCED` / `DRIFT` / `INSUFFICIENT-SOURCES` (< 2 distinct owners is never consent). Default tolerance 300000 ms. Reads remote endpoints; sends no data beyond a HEAD request. |
+| `sibyl_attribute` | `{ moves, commits, roster }` | Pure comparator (zero network/git of its own): attributes git ref-moves to committer identities against a roster. Per-move verdict: `ATTRIBUTED` / `UNATTRIBUTED` (the silent-egress case) / `AMBIGUOUS` (byte-equal roster pair = registry defect, blocks, never picks). Identity matching is byte-exact by design — no normalization. |
 
 ## Options
 
@@ -121,8 +129,14 @@ The published package pins **no device-side model authorizations**: the only
 model defaults shipped are empty-string sentinels (= "host default") and the
 generic `local-` seating prefix. Concrete provider/model ids live exclusively
 in **your** config — the registration tuple's options object (per-operator
-`modelPool` / `modelPolicy` / `--model` flag). `./ship.sh` fails the release if
-any vendor model id reappears on a shipped surface.
+`modelPool` / `modelPolicy` / `--model` flag). Operators on shared fleets
+conventionally keep the concrete values in an operator-local file (e.g.
+`operator/release.env`, key `HISTORIAN_TRANSLATE_MODEL=<provider/model>`) that
+their own shell/opencode config feeds into that options object at registration
+time; that file sits outside the package boundary — `package.json` `files`
+ships only `dist/`, `README.md`, `LICENSE`, and ship.sh gate 5a fails the
+release if anything else appears in the tarball. `./ship.sh` additionally
+fails the release if any vendor model id reappears on a shipped surface.
 
 ## State layout
 
@@ -162,7 +176,7 @@ Dependencies point downward only:
 
 ```
 index.ts            plugin entry: parse options → share one RunStore + client
-                    adapter → register the three tools
+                    adapter → register the seven sibyl_* tools
 ├── engine/         runPersona(): create + prompt one child session through a
 │                   structural client seam; per-stage timeouts; never throws —
 │                   every failure is a structured PersonaRunResult
@@ -188,6 +202,7 @@ index.ts            plugin entry: parse options → share one RunStore + client
 ├── options.ts      zod v4 schema + parseOptions (never throws)
 ├── cli.ts          v1.1 sibyl-chamber bin: run | status | spotcheck | kill
 └── tools/          sibyl_consult / sibyl_swarm / sibyl_status / sibyl_review
+                    + audit primitives (anchor / time probe / attribution)
                     glue + shared helpers (model-slot chain, artifact reader)
 ```
 
