@@ -8,7 +8,7 @@
 //   run  --target <path|-> --goal <text> [--profile review|exam]
 //        [--scenario <file> ...] [--seed <hex>] [--max-rounds n]
 //        [--model <provider/model>] [--judge-pool <ids,comma>] [--config <json>]
-//        [--kill-role <r> --kill-after <ms>] [--detach]
+//        [--kill-role <r> --kill-after <ms>] [--opencode-bin <path> --config-source <jsonc>] [--detach]
 //   status [--run-id <id>] [--tail n]        (E5 record view)
 //   spotcheck <runDir|runId>                 (A4 one-command verification)
 //   kill <runDir> <role>                     (L4 pidfile-only)
@@ -92,8 +92,15 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
   }
   const laneCfg: LaneBase = {
     runRoot: typeof flags["run-root"] === "string" ? flags["run-root"] : opts?.lane.runRoot ?? "/tmp",
-    opencodeBin: opts?.lane.opencodeBin ?? "",
-    configSource: opts?.lane.configSource ?? "",
+    // empty bin crashed spawn with ERR_INVALID_ARG_VALUE (exam-venue injury, 2026-10-03);
+    // resolution order: flag -> config -> env -> PATH name (spawn resolves bare names).
+    opencodeBin:
+      typeof flags["opencode-bin"] === "string" ? flags["opencode-bin"]
+      : (opts?.lane.opencodeBin ?? "").length > 0 ? (opts as { lane: { opencodeBin: string } }).lane.opencodeBin
+      : (process.env["OPENCODE_BIN"] ?? "").length > 0 ? (process.env["OPENCODE_BIN"] as string)
+      : "opencode",
+    configSource:
+      typeof flags["config-source"] === "string" ? flags["config-source"] : opts?.lane.configSource ?? "",
   };
   const modelFlag = typeof flags["model"] === "string" ? flags["model"] : null;
   const pool = opts?.modelPool ?? { default: { providerID: "", modelID: "" } };
@@ -331,7 +338,7 @@ function usage(): number {
   console.log(
     "usage: sibyl-chamber run --target <path|-> --goal <text> [--profile review|exam] [--scenario f.json ...]\n" +
       "                     [--model p/m] [--judge-pool id,id] [--seed s] [--max-rounds n] [--config json] [--detach]\n" +
-      "                     [--kill-role <r> --kill-after <ms>]\n" +
+      "                     [--kill-role <r> --kill-after <ms>] [--opencode-bin <path> --config-source <jsonc>]\n" +
       "       sibyl-chamber status [--run-id <id>] [--tail n]\n" +
       "       sibyl-chamber spotcheck <runDir|runId>\n" +
       "       sibyl-chamber kill <runDir> <role>",
