@@ -143,25 +143,31 @@ function describeError(err: unknown): string {
  * including objects whose property getters throw - yields ok:false with
  * readable errors. NEVER throws.
  */
-/** Headless discovery of the opencode binary for package defaults (the
- * role lane runs on a PINNED PATH, so it must be handed an absolute bin):
- * first hit among known install locations. Empty string when nothing is
- * found — launchRole then fails LOUD naming the var/path, never guesses
- * through a shell PATH. Operators override via options.lane.opencodeBin. */
+/** Headless discovery of the opencode binary for package defaults:
+ * first hit among known install locations, else the bare PATH name
+ * "opencode" (spawn resolves it through the child env's PATH). The
+ * return is NEVER empty: an empty string violated the min(1) schema and
+ * DISABLED the whole plugin on machines without a probed install path
+ * (2026-10-03 injury: 30 tests + smoke red here), and an empty bin also
+ * crashed spawn with ERR_INVALID_ARG_VALUE. A wrong guess fails LOUD at
+ * launchRole spawn time naming the bin, not silently at parse time.
+ * Operators override via options.lane.opencodeBin (or OPENCODE_BIN /
+ * --opencode-bin on the CLI; see resolveRun's flag->config->env->name order). */
 export function discoverOpencodeBin(): string {
   const candidates = [
+    process.env["OPENCODE_BIN"] ?? "",
     join(homedir(), ".local", "bin", "opencode"),
     "/usr/local/bin/opencode",
     "/usr/bin/opencode",
   ];
   for (const c of candidates) {
     try {
-      if (existsSync(c)) return c;
+      if (c.length > 0 && existsSync(c)) return c;
     } catch {
       // keep probing
     }
   }
-  return "";
+  return "opencode";
 }
 
 export function parseOptions(raw: unknown): ParseOptionsResult {

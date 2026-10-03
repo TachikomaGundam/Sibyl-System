@@ -36,7 +36,7 @@ spotcheckable (`sha256sum -c CHECKSUMS.txt`) and append-only-ledgered.
 Laws: docs/isolation-laws.md. Mechanism: docs/democratic-centralism.md.
 
 ```
-node dist/cli.js run --target doc.md --goal "Is this sound?" --model local-qwen/qwen3.8-flash-next
+node dist/cli.js run --target doc.md --goal "Is this sound?" --model your-provider/your-model
 node dist/cli.js status --tail 5
 node dist/cli.js spotcheck <runId>
 ```
@@ -111,6 +111,18 @@ defaults.
 | `timeoutMs` | `240000` | Per-child-session timeout (create + prompt share the budget). Integer ≥ 1. |
 | `concurrencyK` | `4` | Cap on parallel workers per wave (also capped by the schema's own `concurrency`). Integer 1–8. |
 | `staggerMs` | `2000` | Delay between worker launches within a wave, to avoid rate-limit bursts. Integer ≥ 0. |
+| `lane` | see below | v1.1 isolated-lane mechanics for `sibyl_review` / `sibyl-chamber` (`src/lane/isolated.ts`). Sub-keys: `runRoot` (string, default `"/tmp"`) — parent dir for run dirs; `opencodeBin` (non-empty string; discovery order: `$OPENCODE_BIN` → `~/.local/bin/opencode` → `/usr/local/bin/opencode` → `/usr/bin/opencode` → bare PATH name `"opencode"`; never empty, a wrong guess fails loud at spawn naming the bin) — the binary launched for each isolated role; `configSource` (default `~/.config/opencode/opencode.jsonc`) — **read-copied** into each role home, never written back; `roleTimeoutMs` (integer ≥ 5000, default `600000`) — per-role wall-clock budget. |
+| `modelPolicy` | `{ allowedPrefixes: ["local-"] }` | v1.1 E4/F1 seating allow-list: only pool models whose `providerID/modelID` starts with one of these prefixes may take a seat; everything else is denied at launch. Array of non-empty strings, **at least 1 entry** (an empty list is rejected as a deny-everything typo). Set this to your own machine's providers — the shipped default is a prefix pattern, not a specific model. |
+| `chamber` | see below | v1.1 review-chamber seats and rounds. Sub-keys: `maxRounds` (integer 1–8, default `3`) — clash/cross-critique round cap; `roles` (`{ evidence, pro, con, judge }` → pool slot names, each default `"default"`); `judgePool` (non-empty array of slot names, default `["default"]`) — the slots the independent judge may be drawn from (E2 pool+seed committed before launch). |
+
+### Portability (release principle)
+
+The published package pins **no device-side model authorizations**: the only
+model defaults shipped are empty-string sentinels (= "host default") and the
+generic `local-` seating prefix. Concrete provider/model ids live exclusively
+in **your** config — the registration tuple's options object (per-operator
+`modelPool` / `modelPolicy` / `--model` flag). `./ship.sh` fails the release if
+any vendor model id reappears on a shipped surface.
 
 ## State layout
 
@@ -191,9 +203,10 @@ PLAN→MINT→DISPATCH→AGGREGATE pipeline over ordinary child sessions.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run test        # 309 unit tests, fully offline (no network, no LLM)
-npm run build       # esbuild bundle → dist/index.js (ESM)
+npm test            # 346 unit tests, fully offline (no network, no LLM)
+npm run build       # esbuild bundle → dist/index.js + dist/cli.js (ESM)
 node smoke/run-smoke.mjs   # offline smoke of the shipped surface (see smoke/README.md)
+./ship.sh           # the full release gate: all of the above + portability scan of the packed tarball
 ```
 
 Live end-to-end evidence (real opencode, real model sessions):
