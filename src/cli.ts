@@ -28,6 +28,7 @@ import { runChamber, type ChamberConfig, type ChamberRole, type Lane, type Launc
 import { launchRole, collectSessionDb, killRole, type LaneConfig } from "./lane/isolated.ts";
 import { parseScenario, type ScenarioSpec } from "./exam/scenario.ts";
 import { runExamScenario, type CandidateDriver, type ExamResult } from "./exam/runner.ts";
+import { runBell } from "./exam/bell.ts";
 import { parseOptions, type PluginOptions } from "./options.ts";
 
 export type CliFlags = Record<string, string | boolean>;
@@ -325,6 +326,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (run.exam !== null) {
       const driver = makeExamDriver(run.laneCfg, run.runDir, run.exam.modelId, run.timeoutMs);
       const results: ExamResult[] = [];
+      const scPaths = typeof flags["scenario"] === "string" ? [flags["scenario"]] : [];
+      if (flags["allow-unbellied"] !== true) {
+        for (const sp of scPaths) {
+          const b = await runBell(sp);
+          if (!b.ok) { console.log(`SIBYL REFUSE — bell preflight failed for ${sp}: ${b.detail}`); return 1; }
+          console.log(`bell preflight OK: ${sp} — ${b.detail}`);
+        }
+      }
       for (const sc of run.exam.scenarios) results.push(await runExamScenario(sc, run.runDir, driver));
       console.log(examVoice(results, run.runId, run.runDir));
       return 0;

@@ -8,7 +8,7 @@ import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const SIGNAL_KINDS = ["order", "absent", "disk", "text"] as const;
+export const SIGNAL_KINDS = ["order", "absent", "disk", "text", "consistency"] as const;
 export type SignalKind = (typeof SIGNAL_KINDS)[number];
 
 export type SignalSpec = {
@@ -21,6 +21,11 @@ export type SignalSpec = {
   /** for kind=disk: path (may contain {fixtures}) + substring it must hold. */
   path?: string;
   contains?: string;
+  /** kind=consistency: claim present at claimPath WHILE contradiction present at contradictionPath = FAIL. */
+  claimPath?: string;
+  claim?: string;
+  contradictionPath?: string;
+  contradiction?: string;
   /** a machine-generated row the grader appends on FAIL. */
   note: string;
 };
@@ -49,8 +54,8 @@ function validateSignal(raw: unknown): string | null {
   const o = raw as Record<string, unknown>;
   if (typeof o["id"] !== "string" || !ID_RE.test(o["id"])) return `signal id invalid: ${String(o["id"])}`;
   if (!(SIGNAL_KINDS as readonly string[]).includes(String(o["kind"]))) return `signal ${o["id"]}: kind must be one of ${SIGNAL_KINDS.join("|")}`;
-  if (typeof o["pattern"] !== "string") return `signal ${o["id"]}: pattern must be a string`;
-  if (o["pattern"].length > 0) {
+  if (typeof o["pattern"] !== "string" && o["kind"] !== "consistency") return `signal ${o["id"]}: pattern must be a string`;
+  if (typeof o["pattern"] === "string" && o["pattern"].length > 0) {
     try {
       new RegExp(o["pattern"]);
     } catch (e) {
@@ -58,6 +63,11 @@ function validateSignal(raw: unknown): string | null {
     }
   }
   if (o["forbidAfter"] !== undefined && typeof o["forbidAfter"] !== "string") return `signal ${o["id"]}: forbidAfter must be string`;
+  if (o["kind"] === "consistency") {
+    for (const f of ["claimPath", "claim", "contradictionPath", "contradiction"] as const) {
+      if (typeof o[f] !== "string" || (o[f] as string).length === 0) return `signal ${o["id"]}: consistency kind needs ${f}`;
+    }
+  }
   if (o["kind"] === "disk") {
     if (typeof o["path"] !== "string" || o["path"].length === 0) return `signal ${o["id"]}: disk kind needs path`;
     if (typeof o["contains"] !== "string") return `signal ${o["id"]}: disk kind needs contains`;
