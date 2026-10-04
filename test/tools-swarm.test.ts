@@ -230,3 +230,12 @@ test("W3 stamp: swarm terminal record carries the instrument face; receipt names
   const run = await oneRun(store);
   assert.deepEqual(run.instrument, instrumentFace());
 });
+
+test("W1 stamp: swarm terminal record carries the independence finding (bare mock => UNVERIFIABLE)", async () => {
+  const { deps, ctx, store } = await fixture(happyScript());
+  const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);
+  assert.ok(out.includes("independence=UNVERIFIABLE"), out.slice(0, 220));
+  const run = await oneRun(store);
+  assert.equal(run.independence?.status, "UNVERIFIABLE");
+  assert.ok(run.notes?.includes("independence=UNVERIFIABLE"), run.notes);
+});

@@ -19,6 +19,7 @@ import type { PluginOptions } from "../src/options.ts";
 import { RunStore } from "../src/state/index.ts";
 import type { RunRecord } from "../src/state/index.ts";
 import { consultExecute } from "../src/tools/consult.ts";
+import { mkdtemp as _mkdtemp, readFile as _readFile, writeFile } from "node:fs/promises";
 import { instrumentFace } from "../src/instrument.ts";
 import type { ToolContextLike, ToolDeps } from "../src/tools/shared.ts";
 
@@ -299,4 +300,63 @@ test("W3 stamp: consult terminal record carries the instrument face; receipt nam
   assert.match(out, /rules=[0-9a-f]{12} components=\d+/);
   const runs = await loadRuns(deps.store);
   assert.deepEqual(runs[0]?.instrument, instrumentFace());
+});
+
+// --- W1 convener-recusal integration locks ------------------------------------
+
+test("W1 unreadable chain (bare mock client): UNVERIFIABLE recorded and shown, never silently independent", async () => {
+  const { deps } = await fixture({
+    "sess-1": [{ text: MEL_REJECT }],
+    "sess-2": [{ text: BAL_APPROVE }],
+    "sess-3": [{ text: CAS_REJECT }],
+  });
+  const out = await consultExecute(deps, { artifact: "inline artifact\nsecond line", goal: "ship safely" }, { directory: "/srv/work", abort: new AbortController().signal, sessionID: "ses_caller" } satisfies ToolContextLike);
+  assert.ok(out.includes("independence=UNVERIFIABLE"), out.slice(0, 200));
+  const runs = await loadRuns(deps.store);
+  assert.equal(runs[0]?.independence?.status, "UNVERIFIABLE");
+  assert.ok(runs[0]?.independence?.evidence.includes("session.get") ?? false, runs[0]?.independence?.evidence);
+});
+
+test("W1 self-convoked poll: drafter's chain convened the review => NOT-INDEPENDENT on face + record, ballot preserved", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-w1-consult-"));
+  const artPath = join(dir, "proposal.md");
+  await writeFile(artPath, "# proposal\nbody text\n", "utf8");
+  const voterTexts: Record<string, string> = { "sess-1": MEL_REJECT, "sess-2": BAL_APPROVE, "sess-3": CAS_REJECT };
+  let created = 0;
+  const client: EngineClient = {
+    session: {
+      async create() {
+        created += 1;
+        return { data: { id: `sess-${String(created)}` } };
+      },
+      async prompt(args) {
+        return { data: { info: { providerID: "p", modelID: "m" }, parts: [{ type: "text", text: voterTexts[args.path.id] ?? "" }] } };
+      },
+      async get(args) {
+        if (args.path.id === "ses_caller") return { data: { id: "ses_caller", parentID: "" } };
+        return { error: { message: "unknown" } };
+      },
+      async messages(args) {
+        if (args.path.id === "ses_caller") {
+          return { data: [{ info: { role: "assistant" }, parts: [{ type: "tool", tool: "write", input: { filePath: artPath, content: "# proposal\nbody text\n" } }] }] };
+        }
+        return { data: [] };
+      },
+    },
+  };
+  const parsed = parseOptions({});
+  assert.ok(parsed.ok);
+  const store = new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") });
+  const deps = { client, store, options: parsed.options };
+  const ctx: ToolContextLike = { directory: dir, abort: new AbortController().signal, sessionID: "ses_caller" };
+  const out = await consultExecute(deps, { artifact: artPath, goal: "ship safely" }, ctx);
+
+  // line one keeps the voted tally; line two denies the effective path
+  assert.match(out.split("\n")[0] ?? "", /^SIBYL CONSULT: REJECT /);
+  assert.match(out, /^  independence=NOT-INDEPENDENT — drafting evidence: write on /m);
+  const runs = JSON.parse(await readFile(join(dir, "runs.json"), "utf8")) as RunRecord[];
+  assert.equal(runs[0]?.independence?.status, "NOT-INDEPENDENT");
+  assert.deepEqual(runs[0]?.independence?.convenerChain, ["ses_caller"]);
+  assert.equal(runs[0]?.verdict?.verdict, "REJECT", "ballot preserved as data");
+  assert.ok(runs[0]?.notes?.includes("not in any effective path"), runs[0]?.notes);
 });

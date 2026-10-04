@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { tool } from "@opencode-ai/plugin";
 
+import { assessIndependence, independenceLabel } from "../independence.ts";
 import { instrumentFace, rulesLabel } from "../instrument.ts";
 import { internalError, readArtifact } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
@@ -74,10 +75,23 @@ export async function reviewExecute(
 
     await writeFile(join(runDir, "run-config.json"), `${JSON.stringify(opts, null, 2)}\n`, "utf8");
 
+    // W1 convener-recusal: the chain can only be resolved HERE (the chamber
+    // runner is headless). The finding is staged inside the run dir and the
+    // runner copies it into its own record — and --run-id pins the launch
+    // receipt and the run record to ONE identity (misnaming pre-W1 class).
+    const independence = await assessIndependence(deps.client, context.directory, context.sessionID, artifact);
+    await writeFile(
+      join(runDir, "launch-context.json"),
+      `${JSON.stringify({ convenerSessionID: context.sessionID, independence }, null, 2)}\n`,
+      "utf8",
+    );
+
     const cmd = cliCommand(import.meta.url, nodeBinary());
     const spawnArgs = [
       ...cmd.args,
       "run",
+      "--run-id",
+      runId,
       "--target",
       targetArg,
       "--goal",
@@ -110,6 +124,7 @@ export async function reviewExecute(
       `  voice at: ${join(runDir, "run-record.json")} + chamber-ledger.jsonl (append-only)`,
       `  verify:   ${receipt.spotcheck}`,
       `  ${rulesLabel(instrumentFace())} (the runner records its own full face into the run record)`,
+      `  ${independenceLabel(independence)}`,
     ].join("\n");
   } catch (err) {
     return internalError(REVIEW_TOOL_NAME, err);

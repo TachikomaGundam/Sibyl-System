@@ -12,6 +12,32 @@ export type RunKind = (typeof RUN_KINDS)[number];
 export const RUN_STATUSES = ["running", "done", "failed", "suspended"] as const;
 export type RunStatus = (typeof RUN_STATUSES)[number];
 
+// W1 convener-recusal vocabulary lives with the storage schema (same station
+// as RUN_KINDS/RUN_STATUSES/VERDICT_TAGS). NOT-INDEPENDENT = the convening
+// execution chain is kin to the artifact's drafting: the ballot is preserved
+// as data but never enters an effective path. UNVERIFIABLE = the chain could
+// not be read — the claim was never checked, which is not the same as passed.
+export const INDEPENDENCE_STATUSES = ["INDEPENDENT", "NOT-INDEPENDENT", "UNVERIFIABLE"] as const;
+export type IndependenceStatusTag = (typeof INDEPENDENCE_STATUSES)[number];
+
+export type IndependenceRef = {
+  status: IndependenceStatusTag;
+  convenerChain: string[];
+  evidence: string;
+};
+
+export function isIndependenceShape(v: unknown): v is IndependenceRef {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (!(INDEPENDENCE_STATUSES as readonly unknown[]).includes(o["status"])) return false;
+  if (!Array.isArray(o["convenerChain"]) || !o["convenerChain"].every((s) => typeof s === "string" && s.length > 0)) return false;
+  return typeof o["evidence"] === "string";
+}
+
+export function rebuildIndependence(v: IndependenceRef): IndependenceRef {
+  return { status: v.status, convenerChain: [...v.convenerChain], evidence: v.evidence };
+}
+
 // CANNOT_ANSWER (added 2026-09-29 after the G10 review series): the council could
 // not form a decision — error/missing ballots left neither an approval path nor a
 // decided rejection. It is NOT a substantive reject: conflating a wounded ruler
@@ -81,6 +107,7 @@ export type RunRecord = {
   updatedAt: string;
   notes?: string;
   instrument?: InstrumentRef;
+  independence?: IndependenceRef;
 };
 
 /** Rename implementation seam (tests inject a flaky rename to exercise the
@@ -206,6 +233,13 @@ export function validateEntry(raw: unknown): EntryVerdict {
       return { ok: false, reason: "instrument must be {rulesHash: 64-hex, components: name->64-hex} when present" };
     }
     record.instrument = rebuildInstrument(instrument);
+  }
+  const independence = field(raw, "independence");
+  if (independence !== undefined) {
+    if (!isIndependenceShape(independence)) {
+      return { ok: false, reason: "independence must be {status: INDEPENDENT|NOT-INDEPENDENT|UNVERIFIABLE, convenerChain: string[], evidence: string} when present" };
+    }
+    record.independence = rebuildIndependence(independence);
   }
   return { ok: true, record };
 }

@@ -18,6 +18,7 @@ import { tool } from "@opencode-ai/plugin";
 import { COUNCILORS, tallyVotes } from "../council/index.ts";
 import type { CouncilorId, CouncilVote } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
+import { assessIndependence, independenceLabel } from "../independence.ts";
 import { instrumentFace, rulesLabel } from "../instrument.ts";
 import { classifyFailure, deadFaceCount, deadWithoutRecord, formatTerminalRow, parseTerminalRows } from "../terminal.ts";
 import { parseVerdict } from "../verdict/index.ts";
@@ -168,6 +169,10 @@ export async function consultExecute(
     return `SIBYL consult: ${read.error}`;
   }
 
+  // W1 convener-recusal: assess BEFORE the vote — a party may not choose its
+  // own court, and the finding must be on the record whichever way the poll goes.
+  const independence = await assessIndependence(deps.client, context.directory, context.sessionID, read);
+
   const { record } = await deps.store.createRun({
     kind: "consult",
     artifact: read.source,
@@ -222,14 +227,16 @@ export async function consultExecute(
       missing: tally.missing,
     },
     instrument: instrumentFace(),
+    independence,
     notes:
-      `policy=${tally.policy} ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict)` : ""} ` +
+      `policy=${tally.policy} ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict)` : ""} independence=${independence.status}${independence.status === "NOT-INDEPENDENT" ? " (self-convoked: ballot preserved, not in any effective path)" : ""} ` +
       outcomes.map((o) => `${o.id}=${ballotTag(o.vote)} reply=${o.replyPath}`).join(" · "),
   };
   await deps.store.appendOrUpdate(finalRecord);
 
   const lines: string[] = [
     `SIBYL CONSULT: ${effectiveVerdict} (${deadFaceCount(dead)} votes ${String(tally.approvals)}A/${String(tally.rejects)}R/${String(tally.errors)}E/${String(tally.missing)}M) run ${record.runId}`,
+    `  ${independenceLabel(independence)}`,
     ...tally.reasons.map((r) => `  reason: ${r}`),
     ...tally.must_fix.map((m) => `  must_fix: ${m}`),
     ...outcomes.map((o) => `  reply: ${o.id} -> ${o.replyPath}`),

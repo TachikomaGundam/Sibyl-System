@@ -114,8 +114,25 @@ export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
               parts: m.parts.map((p) => ({
                 type: p.type,
                 ...("text" in p && p.text !== undefined && { text: p.text }),
+                // W1 drafting-evidence read: tool name + input bag of tool parts
+                ...(p.type === "tool" && {
+                  tool: p.tool,
+                  ...(p.state.input !== undefined && { input: p.state.input as Record<string, unknown> }),
+                }),
               })),
             })),
+          }),
+          ...(r.error !== undefined && { error: r.error }),
+        };
+      },
+      async get(args: { path: { id: string } }) {
+        const r = await sdk.session.get(args as never);
+        return {
+          ...(r.data !== undefined && {
+            data: {
+              ...(r.data.id !== undefined && { id: r.data.id }),
+              ...(r.data.parentID !== undefined && { parentID: r.data.parentID }),
+            },
           }),
           ...(r.error !== undefined && { error: r.error }),
         };
