@@ -135,7 +135,7 @@ export type RunPersonaOptions = {
    * parented voter/worker never clutters the human's top-level session list,
    * stays navigable from the parent, and its full transcript remains in the
    * DB as evidence. Omitted or empty → headless: top-level during the run,
-   * then GC'd on success (1.1.2) — a failed vote keeps its row for salvage. */
+   * then GC'd on success (1.2.0) — a failed vote keeps its row for salvage. */
   parentID?: string | undefined;
 };
 
