@@ -18,6 +18,7 @@ import { RunStore } from "../src/state/index.ts";
 import type { PluginOptions } from "../src/options.ts";
 import type { RunRecord } from "../src/state/index.ts";
 import { swarmExecute } from "../src/tools/swarm.ts";
+import { instrumentFace } from "../src/instrument.ts";
 import type { ToolContextLike, ToolDeps } from "../src/tools/shared.ts";
 
 const SCHEMA = JSON.stringify({
@@ -220,4 +221,12 @@ test("W2 dead-without-record: unrecordable rows force CANNOT_ANSWER, never a vot
   assert.equal(run.verdict?.verdict, "CANNOT_ANSWER");
   assert.ok(run.verdict !== undefined && run.verdict.rejects === 0, "dead seats must not fold into any vote");
   assert.ok(run.notes?.includes("left no terminal row"), run.notes);
+});
+
+test("W3 stamp: swarm terminal record carries the instrument face; receipt names the ruler", async () => {
+  const { deps, ctx, store } = await fixture(happyScript());
+  const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);
+  assert.match(out, /rules=[0-9a-f]{12} components=\d+/);
+  const run = await oneRun(store);
+  assert.deepEqual(run.instrument, instrumentFace());
 });

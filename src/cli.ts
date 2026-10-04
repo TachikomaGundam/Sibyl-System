@@ -22,6 +22,7 @@ import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { compactIso } from "./state/record.ts";
+import { instrumentFace } from "./instrument.ts";
 import { DEFAULT_CHAMBER_LEDGER, loadLedger, spotcheckCommand, type ChamberRecord } from "./state/chamber.ts";
 import { buildVoice, renderVoice } from "./chamber/synthesis.ts";
 import { runChamber, type ChamberConfig, type ChamberRole, type Lane, type LaunchFacts } from "./chamber/protocol.ts";
@@ -194,6 +195,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     maxRounds,
     pool: effectivePool,
     policy,
+    instrument: instrumentFace(),
     slots,
     judgePoolIds: judgePoolIds.length > 0 ? judgePoolIds : [...new Set(judgeSlotNames.map((s) => slotToId(s, effectivePool)).filter((x): x is string => x !== null))],
     lane: null as unknown as Lane, // wired below (type seam: lane needs cfg, cfg needs lane)

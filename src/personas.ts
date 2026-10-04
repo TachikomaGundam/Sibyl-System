@@ -54,6 +54,25 @@ export const ARCHITECT_PERSONA: Persona = {
   modelSlot: "architect",
 };
 
+/** The demand sent back into a voter's own session when its first reply did
+ * not parse (parseVerdict's ONE repair shot). Lives in the persona registry so
+ * the instrument face (W3) hashes the exact text voters receive. */
+export function repairDemand(why: string): string {
+  return (
+    `Your previous reply was not a valid verdict JSON (${why}). ` +
+    'Reply again with EXACTLY one JSON object and nothing else - no prose, no markdown fences: ' +
+    '{"verdict":"APPROVE"|"REJECT","confidence":<number between 0 and 1>,' +
+    '"reasons":[<strings>],"must_fix":[<strings>]}'
+  );
+}
+
+/** The swarm judge's system + one-word contract (same W3 reason). */
+export const SWARM_JUDGE_SYSTEM =
+  "You are the SIBYL swarm judge. You rule on pipeline reports with exactly one word: APPROVE, REJECT, or EXHAUSTED.";
+
+export const SWARM_JUDGE_WORD_CONTRACT =
+  'Respond with EXACTLY one word and nothing else: APPROVE, REJECT, or EXHAUSTED.';
+
 /** Full registry: 3 councilors (personas imported from the council layer) + ARCHITECT. */
 export const PERSONAS: Record<PersonaId, Persona> = {
   MELCHIOR: {

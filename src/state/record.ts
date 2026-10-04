@@ -30,6 +30,38 @@ export type RunVerdict = {
   missing: number;
 };
 
+/** W3 instrument-version-on-the-ballot: which ruler face spoke this ballot.
+ * rulesHash folds the whole component set; components maps each hashed text
+ * (persona prompt / criteria) to its sha256 so a re-evaluation can name the
+ * exact ruler each side ran under. */
+export const INSTRUMENT_NAME = /^[a-z0-9-]{1,40}$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+
+export type InstrumentRef = {
+  rulesHash: string;
+  components: Record<string, string>;
+};
+
+export function isInstrumentShape(v: unknown): v is InstrumentRef {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o["rulesHash"] !== "string" || !HEX64.test(o["rulesHash"])) return false;
+  const comps = o["components"];
+  if (typeof comps !== "object" || comps === null || Array.isArray(comps)) return false;
+  return Object.entries(comps as Record<string, unknown>).every(
+    ([name, hash]) => INSTRUMENT_NAME.test(name) && typeof hash === "string" && HEX64.test(hash),
+  );
+}
+
+/** Fresh rebuild (audit F2 pattern): no aliasing of parsed JSON, no foreign
+ * own keys (incl. a data-property "__proto__") surviving into the record. */
+export function rebuildInstrument(v: InstrumentRef): InstrumentRef {
+  return {
+    rulesHash: v.rulesHash,
+    components: Object.fromEntries(Object.entries(v.components).map(([name, hash]) => [name, hash])),
+  };
+}
+
 /**
  * Durable record of one SIBYL run. JSON-serializable; ISO-8601 strings for
  * dates. Documented extensions over the base plan shape: `notes` (freeform
@@ -48,6 +80,7 @@ export type RunRecord = {
   createdAt: string;
   updatedAt: string;
   notes?: string;
+  instrument?: InstrumentRef;
 };
 
 /** Rename implementation seam (tests inject a flaky rename to exercise the
@@ -166,6 +199,13 @@ export function validateEntry(raw: unknown): EntryVerdict {
   if (notes !== undefined) {
     if (typeof notes !== "string") return { ok: false, reason: "notes must be a string when present" };
     record.notes = notes;
+  }
+  const instrument = field(raw, "instrument");
+  if (instrument !== undefined) {
+    if (!isInstrumentShape(instrument)) {
+      return { ok: false, reason: "instrument must be {rulesHash: 64-hex, components: name->64-hex} when present" };
+    }
+    record.instrument = rebuildInstrument(instrument);
   }
   return { ok: true, record };
 }

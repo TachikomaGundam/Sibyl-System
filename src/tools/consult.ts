@@ -18,9 +18,10 @@ import { tool } from "@opencode-ai/plugin";
 import { COUNCILORS, tallyVotes } from "../council/index.ts";
 import type { CouncilorId, CouncilVote } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
+import { instrumentFace, rulesLabel } from "../instrument.ts";
 import { classifyFailure, deadFaceCount, deadWithoutRecord, formatTerminalRow, parseTerminalRows } from "../terminal.ts";
 import { parseVerdict } from "../verdict/index.ts";
-import { PERSONAS } from "../personas.ts";
+import { PERSONAS, repairDemand } from "../personas.ts";
 import type { RunRecord } from "../state/index.ts";
 import { errMessage, internalError, readArtifact, runInSession, slotForModel } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
@@ -33,15 +34,9 @@ export function buildConsultInput(goal: string, artifactText: string): string {
 }
 
 /** The demand sent back into a voter's own session when its first reply did
- * not parse (parseVerdict's ONE repair shot). */
-export function buildRepairDemand(why: string): string {
-  return (
-    `Your previous reply was not a valid verdict JSON (${why}). ` +
-    'Reply again with EXACTLY one JSON object and nothing else - no prose, no markdown fences: ' +
-    '{"verdict":"APPROVE"|"REJECT","confidence":<number between 0 and 1>,' +
-    '"reasons":[<strings>],"must_fix":[<strings>]}'
-  );
-}
+ * not parse (parseVerdict's ONE repair shot). The text itself lives in the
+ * persona registry — single source with the W3 instrument face. */
+export { repairDemand as buildRepairDemand };
 
 /** Per-voter record kept alongside the tally: ballot + where the full reply landed. */
 type VoterOutcome = {
@@ -112,7 +107,7 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
       directory,
       result.sessionID,
       model,
-      buildRepairDemand(why),
+      repairDemand(why),
       options.timeoutMs,
     );
     return followed.ok ? followed.text : "";
@@ -226,6 +221,7 @@ export async function consultExecute(
       errors: tally.errors,
       missing: tally.missing,
     },
+    instrument: instrumentFace(),
     notes:
       `policy=${tally.policy} ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict)` : ""} ` +
       outcomes.map((o) => `${o.id}=${ballotTag(o.vote)} reply=${o.replyPath}`).join(" · "),
@@ -237,6 +233,7 @@ export async function consultExecute(
     ...tally.reasons.map((r) => `  reason: ${r}`),
     ...tally.must_fix.map((m) => `  must_fix: ${m}`),
     ...outcomes.map((o) => `  reply: ${o.id} -> ${o.replyPath}`),
+    `  ${rulesLabel(finalRecord.instrument ?? instrumentFace())} components=${String(Object.keys(instrumentFace().components).length)}`,
     `  store: ${deps.store.runsFile}`,
   ];
   return lines.join("\n");

@@ -19,6 +19,7 @@ import type { PluginOptions } from "../src/options.ts";
 import { RunStore } from "../src/state/index.ts";
 import type { RunRecord } from "../src/state/index.ts";
 import { consultExecute } from "../src/tools/consult.ts";
+import { instrumentFace } from "../src/instrument.ts";
 import type { ToolContextLike, ToolDeps } from "../src/tools/shared.ts";
 
 const M = { providerID: "p0", modelID: "m0" };
@@ -286,4 +287,16 @@ test("consult with empty caller sessionID creates unparented ballots (no parentI
   await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", sessionID: "", abort: new AbortController().signal });
   assert.equal(creates.length, 3);
   for (const c of creates) assert.equal("parentID" in c, false);
+});
+
+test("W3 stamp: consult terminal record carries the instrument face; receipt names the ruler", async () => {
+  const { deps } = await fixture({
+    "sess-1": [{ text: MEL_REJECT }],
+    "sess-2": [{ text: BAL_APPROVE }],
+    "sess-3": [{ text: CAS_REJECT }],
+  });
+  const out = await consultExecute(deps, { artifact: "inline artifact\nsecond line", goal: "ship safely" }, { directory: "/srv/work", abort: new AbortController().signal, sessionID: "ses_caller" } satisfies ToolContextLike);
+  assert.match(out, /rules=[0-9a-f]{12} components=\d+/);
+  const runs = await loadRuns(deps.store);
+  assert.deepEqual(runs[0]?.instrument, instrumentFace());
 });
