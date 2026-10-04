@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# release-guard pre-push hook (installed from scripts/git-hooks/pre-push into
+# .git/hooks/pre-push — re-copy after fresh clones; hooks are not cloned).
+#
+# Law (human-approved 2026-09-30, dual-vehicle collision of npm 0.2.6):
+#   pushing a NEW or UPDATED refs/tags/v* requires a packet receipt in the
+#   pushing worktree AND a matching release lease. Deletions always pass
+#   (retiring a bad tag must never need paperwork). Non-release refs pass.
+#
+# Receipt  : docs/release/<version>.md  (override: SIBYL_RELEASE_RECEIPT_DIR)
+#            must contain the line:      gate: PASS
+# Lease    : ~/.config/abathur/release-lease.json  (override: SIBYL_RELEASE_LEASE)
+#            must name "version":"<version>"
+# Fail-open ONLY on ref lines we do not police. Every refusal names the file it looked for.
+
+remote="$1"
+url="$2"
+
+top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+RECEIPT_DIR="${SIBYL_RELEASE_RECEIPT_DIR:-$top/docs/release}"
+LEASE_FILE="${SIBYL_RELEASE_LEASE:-$HOME/.config/sibyl/release-lease.json}"
+
+block() { printf 'release-guard: %s\n' "$*" >&2; exit 1; }
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  case "$local_ref" in
+    refs/tags/v*)
+      # zero oid = tag deletion — always allowed
+      [ "$local_oid" = "0000000000000000000000000000000000000000" ] && continue
+      ver="${local_ref#refs/tags/}"
+      receipt="$RECEIPT_DIR/$ver.md"
+      [ -f "$receipt" ] || block "tag $ver -> $remote: no packet receipt $receipt (write it from docs/release/TEMPLATE.md with the border PASS transcript)"
+      grep -q '^gate: PASS' "$receipt" || block "receipt $receipt lacks a 'gate: PASS' line — the gate decides, the receipt only records"
+      [ -f "$LEASE_FILE" ] || block "no release lease at $LEASE_FILE (scripts/release-lease.sh acquire $ver <who>)"
+      grep -Eq "\"version\": ?\"$ver\"" "$LEASE_FILE" || block "lease at $LEASE_FILE does not name $ver — is another seat holding the wheel?"
+      ;;
+  esac
+done
+
+exit 0
