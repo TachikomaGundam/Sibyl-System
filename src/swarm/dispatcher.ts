@@ -12,6 +12,8 @@
 // the batch — check result.ok per child, then suspend/retry/fail per task).
 
 import { runPersona, type PersonaRunResult } from "../engine/index.ts";
+import { classifyFailure, formatTerminalRow } from "../terminal.ts";
+import type { TerminalStatus } from "../terminal.ts";
 import { DEFAULT_SUMMARY_MAX_CHARS, summarizeTaskOutput } from "./aggregate.ts";
 import {
   realClock,
@@ -100,6 +102,7 @@ type Ctx = {
   maxRounds: number;
   clock: Clock;
   writeDraft: DispatchOptions["writeDraft"];
+  writeTerminal: DispatchOptions["writeTerminal"];
 };
 
 type Resolved = Omit<Ctx, "roster" | "taskBy" | "workerByTask" | "stateBy">;
@@ -141,11 +144,35 @@ function composeTaskPrompt(ctx: Ctx, taskId: string): string {
   return lines.length === 0 ? instruction : `${instruction}\n\nUpstream conclusions (from completed dependencies):\n${lines.join("\n")}`;
 }
 
+/** W2: append the task's terminal line. Returns false when the append threw
+ * — callers on the done path must demote (a ballot without its record never
+ * stands); on failure paths the missing line is honestly counted by the gate. */
+async function recordTerminal(
+  ctx: Ctx,
+  taskId: string,
+  workerId: string,
+  status: TerminalStatus,
+  session: string,
+  detail: string,
+): Promise<boolean> {
+  if (ctx.writeTerminal === undefined) return true;
+  try {
+    await ctx.writeTerminal(
+      formatTerminalRow(new Date(), { task: taskId, worker: workerId, status, session, detail }),
+    );
+    return true;
+  } catch (e) {
+    console.error(`[sibyl dispatch] terminal line for ${taskId} failed to write: ${describeFailure(e)}`);
+    return false;
+  }
+}
+
 async function runTask(ctx: Ctx, task: DispatchTaskState): Promise<void> {
   const worker = ctx.workerByTask.get(task.taskId);
   if (worker === undefined) {
     task.status = "failed";
     task.error = `no worker spec for task "${task.taskId}"`;
+    await recordTerminal(ctx, task.taskId, "-", "error", "-", task.error);
     return;
   }
   for (let attempt = 1; attempt <= ctx.maxAttempts; attempt++) {
@@ -166,30 +193,48 @@ async function runTask(ctx: Ctx, task: DispatchTaskState): Promise<void> {
     } catch (e) {
       task.status = "failed";
       task.error = `runPersona threw: ${describeFailure(e)}`;
+      await recordTerminal(ctx, task.taskId, worker.workerId, classifyFailure(task.error), "-", task.error);
       return;
     }
     if (result.ok) {
-      let ref: string;
-      try {
-        ref = await ctx.writeDraft({ taskId: task.taskId, workerId: worker.workerId, text: result.text });
-      } catch (e) {
-        task.status = "failed";
-        task.error = `draft write failed: ${describeFailure(e)}`;
+      // Empty-honey guard (2026-10-04 swarm first campaign): a session that
+      // exits with no content cast no ballot — the old tally showed it as
+      // done. Absence is not participation, so it is a failure, not a vote.
+      if (result.text.trim().length === 0) {
+        task.error = "empty-reply: worker session ended with no content (absence is not a ballot)";
+      } else {
+        let ref: string;
+        try {
+          ref = await ctx.writeDraft({ taskId: task.taskId, workerId: worker.workerId, text: result.text });
+        } catch (e) {
+          task.status = "failed";
+          task.error = `draft write failed: ${describeFailure(e)}`;
+          await recordTerminal(ctx, task.taskId, worker.workerId, "error", result.sessionID, task.error);
+          return;
+        }
+        const recorded = await recordTerminal(ctx, task.taskId, worker.workerId, "ok", result.sessionID, `draft=${ref}`);
+        if (!recorded) {
+          task.status = "failed";
+          task.error = "terminal record write failed (W2: done without its record never stands)";
+          return;
+        }
+        task.refs.push(ref);
+        task.summary = summarizeTaskOutput(result.text, ctx.summaryMaxChars);
+        if (result.sessionID !== "") task.sessionId = result.sessionID;
+        task.status = "done";
         return;
       }
-      task.refs.push(ref);
-      task.summary = summarizeTaskOutput(result.text, ctx.summaryMaxChars);
-      if (result.sessionID !== "") task.sessionId = result.sessionID;
-      task.status = "done";
-      return;
+    } else {
+      task.error = result.error ?? "unknown engine error";
     }
-    task.error = result.error ?? "unknown engine error";
     if (isRateLimitError(task.error)) {
       task.status = "suspended";
+      await recordTerminal(ctx, task.taskId, worker.workerId, "error", "-", `suspended: ${task.error}`);
       return;
     }
   }
   task.status = "failed";
+  await recordTerminal(ctx, task.taskId, worker.workerId, classifyFailure(task.error ?? ""), "-", task.error ?? "attempts exhausted");
 }
 
 async function runWaves(ctx: Ctx, state: DispatchState): Promise<void> {
@@ -198,7 +243,12 @@ async function runWaves(ctx: Ctx, state: DispatchState): Promise<void> {
     if (schedulable.length === 0) break;
     if (state.rounds >= ctx.maxRounds) {
       state.exhausted = true;
-      for (const t of state.tasks) if (t.status === "pending") t.status = "suspended";
+      for (const t of state.tasks) {
+        if (t.status === "pending") {
+          t.status = "suspended";
+          await recordTerminal(ctx, t.taskId, ctx.workerByTask.get(t.taskId)?.workerId ?? "-", "error", "-", "exhausted: round budget spent before launch");
+        }
+      }
       break;
     }
     state.rounds += 1;
@@ -209,9 +259,12 @@ async function runWaves(ctx: Ctx, state: DispatchState): Promise<void> {
     })());
     await Promise.all(launches);
   }
-  for (const t of state.tasks) if (t.status === "pending") {
-    t.status = "failed";
-    t.error = "blocked by non-done dependency";
+  for (const t of state.tasks) {
+    if (t.status === "pending") {
+      t.status = "failed";
+      t.error = "blocked by non-done dependency";
+      await recordTerminal(ctx, t.taskId, ctx.workerByTask.get(t.taskId)?.workerId ?? "-", "error", "-", t.error);
+    }
   }
 }
 
@@ -264,6 +317,7 @@ async function run(prior: DispatchState | undefined, roster: Roster, opts: Dispa
       maxRounds,
       clock: opts.clock ?? realClock(),
       writeDraft: opts.writeDraft,
+      writeTerminal: opts.writeTerminal,
     };
     let state = prior ?? makeState(roster);
     if (prior !== undefined) {

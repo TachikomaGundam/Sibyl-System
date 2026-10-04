@@ -432,3 +432,73 @@ test("full pipeline PLAN → MINT → DISPATCH → AGGREGATE ends APPROVE with a
   assert.deepEqual(report.tasks.map((t) => t.id), ["t1", "t2"]);
   assert.deepEqual(report.artifacts, ["/space/t1.md", "/space/t2.md"]);
 });
+// --- W2 absence-as-disability locks (2026-10-04 handoff) ----------------------
+
+test("W2 empty-honey: a session ending with no content FAILS the task (never done), rows=error", async () => {
+  const schema = schemaOf([{ id: "t1", instructions: "produce", dependsOn: [] }]);
+  const { client } = scriptedClient(() => okResponse("   \n  "));
+  const rows: string[] = [];
+  const result = await dispatchRoster(
+    rosterFor(schema),
+    baseOpts(client, { writeTerminal: async (l) => { rows.push(l); } }),
+  );
+  assert.equal(result.ok, true);
+  const task = result.ok ? result.outcome.tasks[0] : undefined;
+  assert.equal(task?.status, "failed");
+  const errState = result.ok ? result.outcome.state.tasks[0]?.error ?? "" : "";
+  assert.ok(errState.includes("empty-reply"), errState);
+  assert.equal(rows.length, 1); // rows are per terminal state, not per attempt
+  assert.ok(rows.every((r) => /task=t1 .* status=error /.test(r)), rows.join(" | "));
+});
+
+test("W2 terminal rows: done / suspended each leave exactly one parseable row", async () => {
+  const schema = schemaOf([
+    { id: "t1", instructions: "ok path", dependsOn: [] },
+    { id: "t2", instructions: "suspended path", dependsOn: [] },
+  ]);
+  const { client } = scriptedClient((text) =>
+    text.includes("suspended")
+      ? { error: { name: "HTTPError", message: "429 Too Many Requests" } }
+      : okResponse("real draft content"),
+  );
+  const rows: string[] = [];
+  const result = await dispatchRoster(rosterFor(schema), baseOpts(client, { writeTerminal: async (l) => { rows.push(l); } }));
+  assert.equal(result.ok, true);
+  assert.equal(rows.length, 2);
+  assert.ok(rows.some((r) => /task=t1 worker=\S+ status=ok session=sess-\d+ detail=draft=/.test(r)), rows.join(" | "));
+  assert.ok(rows.some((r) => /task=t2 .* status=error .*detail=suspended: /.test(r)), rows.join(" | "));
+});
+
+test("W2 demotion: terminal row write failure removes done standing", async () => {
+  const schema = schemaOf([{ id: "t1", instructions: "produce", dependsOn: [] }]);
+  const { client } = scriptedClient(() => okResponse("draft body"));
+  const result = await dispatchRoster(
+    rosterFor(schema),
+    baseOpts(client, {
+      writeTerminal: async () => {
+        throw new Error("EISDIR: illegal operation on a directory");
+      },
+    }),
+  );
+  assert.equal(result.ok, true);
+  const task = result.ok ? result.outcome.tasks[0] : undefined;
+  assert.equal(task?.status, "failed");
+  const errState = result.ok ? result.outcome.state.tasks[0]?.error ?? "" : "";
+  assert.ok(errState.includes("terminal record write failed"), errState);
+});
+
+test("W2 blocked-by-dep and exhausted-at-cap tasks still get their rows", async () => {
+  const schema = schemaOf([
+    { id: "t1", instructions: "will fail", dependsOn: [] },
+    { id: "t2", instructions: "depends on t1", dependsOn: ["t1"] },
+  ]);
+  const { client } = scriptedClient(() => ({ error: { message: "engine down" } }));
+  const rows: string[] = [];
+  const result = await dispatchRoster(
+    rosterFor(schema),
+    baseOpts(client, { maxAttempts: 1, writeTerminal: async (l) => { rows.push(l); } }),
+  );
+  assert.equal(result.ok, true);
+  assert.ok(rows.some((r) => /task=t1 .* status=error /.test(r)), rows.join(" | "));
+  assert.ok(rows.some((r) => /task=t2 .* status=error .*detail=blocked by non-done dependency/.test(r)), rows.join(" | "));
+});

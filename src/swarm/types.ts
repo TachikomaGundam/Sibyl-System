@@ -129,6 +129,13 @@ export type DispatchOptions = {
   /** Launch-spacing within a wave (ms); tests inject a fake clock. */
   staggerMs: number;
   writeDraft: WriteDraftFn;
+  /** W2 absence-as-disability: one terminal line (ok|error|timeout + detail)
+   * appended per task as it reaches a terminal state. A `done` task whose
+   * terminal line cannot be written is DEMOTED to failed — a ballot without
+   * its record never stands. Other paths attempt the append and swallow a
+   * throw: the missing line is then honestly counted dead-without-record by
+   * the tally gate, never folded into any vote. */
+  writeTerminal?: (line: string) => void | Promise<void>;
   /** Same-worker retry cap (default 2) for non-rate-limit failures. */
   maxAttempts?: number;
   /** Sleep between attempts of the same task. */
