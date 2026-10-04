@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { tool } from "@opencode-ai/plugin";
 
+import { instrumentFace, rulesLabel } from "../instrument.ts";
 import { internalError, readArtifact } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 import { compactIso } from "../state/record.ts";
@@ -108,6 +109,7 @@ export async function reviewExecute(
       `  status:   ${receipt.statusCmd}`,
       `  voice at: ${join(runDir, "run-record.json")} + chamber-ledger.jsonl (append-only)`,
       `  verify:   ${receipt.spotcheck}`,
+      `  ${rulesLabel(instrumentFace())} (the runner records its own full face into the run record)`,
     ].join("\n");
   } catch (err) {
     return internalError(REVIEW_TOOL_NAME, err);

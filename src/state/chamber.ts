@@ -21,7 +21,7 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/pro
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { isNonEmptyString } from "./record.ts";
+import { isInstrumentShape, isNonEmptyString, rebuildInstrument, type InstrumentRef } from "./record.ts";
 
 /** v1.1 append-only chamber ledger; sibling of ~/.sibyl/runs.json (T5 root). */
 export const DEFAULT_CHAMBER_LEDGER: string = join(homedir(), ".sibyl", "chamber-ledger.jsonl");
@@ -87,6 +87,7 @@ export type ChamberRecord = {
   artifacts: ArtifactRef[];
   evidenceRows: number;
   notes?: string;
+  instrument?: InstrumentRef;
 };
 
 /* ── hashing primitives (machine-generated, never prose) ─────────────── */
@@ -193,6 +194,9 @@ export function validateChamberRecord(raw: unknown): { ok: true; record: Chamber
   if (!Array.isArray(o["artifacts"]) || !o["artifacts"].every(isArtifactRef)) return { ok: false, reason: "artifacts must be an array of ArtifactRef" };
   if (typeof o["evidenceRows"] !== "number" || !Number.isInteger(o["evidenceRows"]) || o["evidenceRows"] < 0) return { ok: false, reason: "evidenceRows must be a non-negative integer" };
   if (o["notes"] !== undefined && typeof o["notes"] !== "string") return { ok: false, reason: "notes must be a string when present" };
+  if (o["instrument"] !== undefined && !isInstrumentShape(o["instrument"])) {
+    return { ok: false, reason: "instrument must be {rulesHash: 64-hex, components: name->64-hex} when present" };
+  }
   const record: ChamberRecord = {
     schema: RECORD_SCHEMA,
     runId: o["runId"],
@@ -214,6 +218,7 @@ export function validateChamberRecord(raw: unknown): { ok: true; record: Chamber
     evidenceRows: o["evidenceRows"],
   };
   if (typeof o["notes"] === "string") record.notes = o["notes"];
+  if (o["instrument"] !== undefined) record.instrument = rebuildInstrument(o["instrument"] as InstrumentRef);
   return { ok: true, record };
 }
 

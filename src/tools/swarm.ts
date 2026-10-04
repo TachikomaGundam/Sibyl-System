@@ -19,7 +19,8 @@ import { deadFaceCount, deadWithoutRecord, parseTerminalRows } from "../terminal
 
 import { COUNCILORS } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
-import { PERSONAS } from "../personas.ts";
+import { instrumentFace, rulesLabel } from "../instrument.ts";
+import { PERSONAS, SWARM_JUDGE_SYSTEM, SWARM_JUDGE_WORD_CONTRACT } from "../personas.ts";
 import { buildReport } from "../swarm/aggregate.ts";
 import { dispatchRoster } from "../swarm/dispatcher.ts";
 import { mintRoster } from "../swarm/minter.ts";
@@ -41,7 +42,7 @@ export function buildJudgeInput(report: SwarmReport): string {
     ...report.tasks.map((t) => `TASK ${t.id}: ${t.status}${t.summary === undefined ? "" : ` — ${t.summary}`}`),
     ...report.artifacts.map((a) => `ARTIFACT: ${a}`),
     "",
-    'Respond with EXACTLY one word and nothing else: APPROVE, REJECT, or EXHAUSTED.',
+    SWARM_JUDGE_WORD_CONTRACT,
   ];
   return lines.join("\n");
 }
@@ -180,7 +181,7 @@ export async function swarmExecute(
     const judged = await runPersona({
       client,
       directory,
-      persona: { system: "You are the SIBYL swarm judge. You rule on pipeline reports with exactly one word: APPROVE, REJECT, or EXHAUSTED." },
+      persona: { system: SWARM_JUDGE_SYSTEM },
       model: slotForModel(options.modelPool, options.swarm.judge, undefined),
       inputText: buildJudgeInput(report),
       timeoutMs: options.timeoutMs,
@@ -213,6 +214,7 @@ export async function swarmExecute(
   await finishRun(deps, record, {
     status: "done",
     rounds: report.rounds,
+    instrument: instrumentFace(),
     verdict: {
       verdict: tag,
       approvals: counts.done,
@@ -229,6 +231,7 @@ export async function swarmExecute(
     `SIBYL SWARM: ${tag} run ${record.runId} (${deadFaceCount(dead)} rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
     ...report.tasks.map((t) => `  task: ${t.id} ${t.status}${t.sessionId === undefined ? "" : ` session=${t.sessionId}`}`),
     ...report.artifacts.map((a) => `  artifact: ${a}`),
+    `  ${rulesLabel(instrumentFace())} components=${String(Object.keys(instrumentFace().components).length)}`,
     `  space: ${record.spaceDir}`,
     `  store: ${store.runsFile}`,
   ];

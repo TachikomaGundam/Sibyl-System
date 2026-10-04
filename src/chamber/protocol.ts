@@ -21,6 +21,7 @@ import { drawJudge, policyAllows, resolveSeat, type SeatPolicy, type SeatPool } 
 import { extractVerdictJson } from "../verdict/index.ts";
 import type { ChamberRecord, RosterRef, TerminalState } from "../state/chamber.ts";
 import { finalizeRecord, sha256Text } from "../state/chamber.ts";
+import type { InstrumentRef } from "../state/record.ts";
 
 export type ChamberRole = "evidence" | "pro" | "con" | "judge";
 
@@ -52,6 +53,10 @@ export type ChamberConfig = {
   /** A2 fault injection: SIGKILL this role's group after N ms of its phase. */
   killInjection?: { role: ChamberRole; afterMs: number };
   now?: () => Date;
+  /** W3: the ruler face stamped onto the run record (instrumentFace() of the
+   * running build; the runner process records its OWN face, never a copy
+   * handed over by the launcher — version identity = the code that speaks). */
+  instrument?: InstrumentRef | undefined;
 };
 
 export type JudgeRound = {
@@ -123,7 +128,7 @@ const CONTRACT = (writeTo: string, sections: string) =>
   `Required structure: ${sections}. The file on disk is the only receipt that counts; keep the chat reply short. ` +
   `Write ONLY inside your run directory.`;
 
-function evidencePrompt(cfg: ChamberConfig, abs: string): string {
+export function evidencePrompt(cfg: ChamberConfig, abs: string): string {
   return (
     `You are the EVIDENCE GATHERER of a Sibyl review chamber. Goal: "${cfg.goal}". ` +
     `Artifact under review: ${cfg.targetPath}. Enumerate evidence sources BROADLY first ` +
@@ -134,7 +139,7 @@ function evidencePrompt(cfg: ChamberConfig, abs: string): string {
   );
 }
 
-function proPrompt(cfg: ChamberConfig, round: number, abs: string, charges: string[]): string {
+export function proPrompt(cfg: ChamberConfig, round: number, abs: string, charges: string[]): string {
   const chargeBlock = charges.length > 0 ? ` Prior open charges you must answer: ${JSON.stringify(charges)}.` : "";
   return (
     `You are PRO (round ${String(round)}) in a Sibyl adversarial chamber. Goal: "${cfg.goal}". ` +
@@ -146,7 +151,7 @@ function proPrompt(cfg: ChamberConfig, round: number, abs: string, charges: stri
   );
 }
 
-function conPrompt(cfg: ChamberConfig, round: number, abs: string, charges: string[]): string {
+export function conPrompt(cfg: ChamberConfig, round: number, abs: string, charges: string[]): string {
   const chargeBlock = charges.length > 0 ? ` Previously contested — sharpen or drop: ${JSON.stringify(charges)}.` : "";
   return (
     `You are CON (round ${String(round)}) in a Sibyl adversarial chamber. Goal: "${cfg.goal}". ` +
@@ -158,7 +163,7 @@ function conPrompt(cfg: ChamberConfig, round: number, abs: string, charges: stri
   );
 }
 
-function rebuttalPrompt(cfg: ChamberConfig, role: "pro" | "con", round: number, otherAbs: string, abs: string): string {
+export function rebuttalPrompt(cfg: ChamberConfig, role: "pro" | "con", round: number, otherAbs: string, abs: string): string {
   return (
     `You are ${role.toUpperCase()} in cross-critique (round ${String(round)}). Read your opponent's artifact at ${otherAbs} ` +
     `plus the evidence ledger under ${join(cfg.runDir, "evidence")} (you may re-probe primary sources). ` +
@@ -168,7 +173,7 @@ function rebuttalPrompt(cfg: ChamberConfig, role: "pro" | "con", round: number, 
   );
 }
 
-function judgePrompt(cfg: ChamberConfig, round: number, paths: string[], abs: string): string {
+export function judgePrompt(cfg: ChamberConfig, round: number, paths: string[], abs: string): string {
   return (
     `You are the INDEPENDENT JUDGE (round ${String(round)}) of a Sibyl chamber. You wrote nothing here. ` +
     `FIRST ACTION (no analysis before it): write a valid interim JSON to ${abs} — ` +
@@ -442,6 +447,7 @@ async function startRecord(cfg: ChamberConfig, roster: RosterRef[], drawCommit: 
     artifacts: [],
     evidenceRows: 0,
   };
+  if (cfg.instrument !== undefined) base.instrument = cfg.instrument;
   const first = await finalizeRecord(base);
   if (!first.ok) throw new Error(`START record refused: ${first.drift.join("; ")}`);
   return first.record;

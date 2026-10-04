@@ -224,5 +224,6 @@ export function formatRunLine(record: RunRecord): string {
   const verdict = record.verdict === undefined ? "-" : `${record.verdict.verdict}(A${String(record.verdict.approvals)}/R${String(record.verdict.rejects)}/E${String(record.verdict.errors)}/M${String(record.verdict.missing)})`;
   const rounds = record.rounds === undefined ? "" : ` rounds=${String(record.rounds)}`;
   const goal = record.goal === undefined ? "" : ` goal="${record.goal}"`;
-  return `${record.runId} ${record.kind} ${record.status} ${verdict}${rounds}${goal} created=${record.createdAt} updated=${record.updatedAt} space=${record.spaceDir}`;
+  const rules = record.instrument === undefined ? "" : ` rules=${record.instrument.rulesHash.slice(0, 12)}`;
+  return `${record.runId} ${record.kind} ${record.status} ${verdict}${rounds}${goal}${rules} created=${record.createdAt} updated=${record.updatedAt} space=${record.spaceDir}`;
 }
