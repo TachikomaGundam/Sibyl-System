@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -146,4 +146,44 @@ test("resolveRun: opencodeBin defaults to PATH name, never empty", async () => {
   } finally {
     if (saved !== undefined) process.env.OPENCODE_BIN = saved;
   }
+});
+
+// --- W1 convener-recusal: identity gate + launch-context pickup ----------------
+
+test("W1 --run-id gate: only bare sibyl run ids are accepted", async () => {
+  const bad = await resolveRun({ target: "/tmp/x", goal: "g", "run-id": "/etc/passwd" });
+  assert.ok(!bad.ok);
+  assert.match(bad.ok ? "" : bad.error, /--run-id must be a bare sibyl run id/);
+  const missingTarget = await resolveRun({ target: "/tmp/sibyl-w1-definitely-missing", goal: "g", "run-id": "sibyl-OK-0001" });
+  assert.ok(!missingTarget.ok);
+  assert.match(missingTarget.ok ? "" : missingTarget.error, /target unreadable/i); // passed the id gate, failed later
+});
+
+test("W1 launch-context.json: staged independence finding rides the chamber record", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runId = "sibyl-TEST-identity-0001";
+  const runDir = join(dir, `sibyl-run-${runId}`);
+  await mkdir(runDir, { recursive: true });
+  const target = join(dir, "art.md");
+  await writeFile(target, "artifact body\nsecond line\n", "utf8");
+  const verdict = { status: "NOT-INDEPENDENT", convenerChain: ["ses_a", "ses_b"], evidence: "drafting evidence: write on the artifact in chain session ses_a" };
+  await writeFile(join(runDir, "launch-context.json"), JSON.stringify({ convenerSessionID: "ses_a", independence: verdict }), "utf8");
+  const r = await resolveRun({ target, goal: "g", "run-id": runId, "run-root": dir });
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  assert.deepEqual(r.ok ? r.run.chamber?.independence : undefined, verdict);
+});
+
+test("W1 launch-context fail-soft: malformed staged shape yields no independence leg (never a crash, never a fake)", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-bad-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runId = "sibyl-TEST-badctx-0002";
+  const runDir = join(dir, `sibyl-run-${runId}`);
+  await mkdir(runDir, { recursive: true });
+  const target = join(dir, "art.md");
+  await writeFile(target, "artifact body\n", "utf8");
+  await writeFile(join(runDir, "launch-context.json"), JSON.stringify({ independence: { status: "GUILT-BY-ASSOCIATION" } }), "utf8");
+  const r = await resolveRun({ target, goal: "g", "run-id": runId, "run-root": dir });
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  assert.equal(r.ok ? r.run.chamber?.independence : "set", undefined);
 });

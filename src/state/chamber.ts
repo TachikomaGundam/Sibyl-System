@@ -21,7 +21,15 @@ import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/pro
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { isInstrumentShape, isNonEmptyString, rebuildInstrument, type InstrumentRef } from "./record.ts";
+import {
+  isIndependenceShape,
+  isInstrumentShape,
+  isNonEmptyString,
+  rebuildIndependence,
+  rebuildInstrument,
+  type IndependenceRef,
+  type InstrumentRef,
+} from "./record.ts";
 
 /** v1.1 append-only chamber ledger; sibling of ~/.sibyl/runs.json (T5 root). */
 export const DEFAULT_CHAMBER_LEDGER: string = join(homedir(), ".sibyl", "chamber-ledger.jsonl");
@@ -88,6 +96,7 @@ export type ChamberRecord = {
   evidenceRows: number;
   notes?: string;
   instrument?: InstrumentRef;
+  independence?: IndependenceRef;
 };
 
 /* ── hashing primitives (machine-generated, never prose) ─────────────── */
@@ -197,6 +206,9 @@ export function validateChamberRecord(raw: unknown): { ok: true; record: Chamber
   if (o["instrument"] !== undefined && !isInstrumentShape(o["instrument"])) {
     return { ok: false, reason: "instrument must be {rulesHash: 64-hex, components: name->64-hex} when present" };
   }
+  if (o["independence"] !== undefined && !isIndependenceShape(o["independence"])) {
+    return { ok: false, reason: "independence must be {status: INDEPENDENT|NOT-INDEPENDENT|UNVERIFIABLE, convenerChain: string[], evidence: string} when present" };
+  }
   const record: ChamberRecord = {
     schema: RECORD_SCHEMA,
     runId: o["runId"],
@@ -219,6 +231,7 @@ export function validateChamberRecord(raw: unknown): { ok: true; record: Chamber
   };
   if (typeof o["notes"] === "string") record.notes = o["notes"];
   if (o["instrument"] !== undefined) record.instrument = rebuildInstrument(o["instrument"] as InstrumentRef);
+  if (o["independence"] !== undefined) record.independence = rebuildIndependence(o["independence"] as IndependenceRef);
   return { ok: true, record };
 }
 

@@ -21,7 +21,7 @@ import { drawJudge, policyAllows, resolveSeat, type SeatPolicy, type SeatPool } 
 import { extractVerdictJson } from "../verdict/index.ts";
 import type { ChamberRecord, RosterRef, TerminalState } from "../state/chamber.ts";
 import { finalizeRecord, sha256Text } from "../state/chamber.ts";
-import type { InstrumentRef } from "../state/record.ts";
+import type { IndependenceRef, InstrumentRef } from "../state/record.ts";
 
 export type ChamberRole = "evidence" | "pro" | "con" | "judge";
 
@@ -57,6 +57,10 @@ export type ChamberConfig = {
    * running build; the runner process records its OWN face, never a copy
    * handed over by the launcher — version identity = the code that speaks). */
   instrument?: InstrumentRef | undefined;
+  /** W1: the convener-recusal assessment taken at LAUNCH time (the chamber
+   * runner is headless; only the calling tool session can resolve the chain,
+   * and it hands the finding over through the run dir, never by trust). */
+  independence?: IndependenceRef | undefined;
 };
 
 export type JudgeRound = {
@@ -448,6 +452,7 @@ async function startRecord(cfg: ChamberConfig, roster: RosterRef[], drawCommit: 
     evidenceRows: 0,
   };
   if (cfg.instrument !== undefined) base.instrument = cfg.instrument;
+  if (cfg.independence !== undefined) base.independence = cfg.independence;
   const first = await finalizeRecord(base);
   if (!first.ok) throw new Error(`START record refused: ${first.drift.join("; ")}`);
   return first.record;

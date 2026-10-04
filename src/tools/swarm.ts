@@ -19,6 +19,7 @@ import { deadFaceCount, deadWithoutRecord, parseTerminalRows } from "../terminal
 
 import { COUNCILORS } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
+import { assessIndependence, independenceLabel } from "../independence.ts";
 import { instrumentFace, rulesLabel } from "../instrument.ts";
 import { PERSONAS, SWARM_JUDGE_SYSTEM, SWARM_JUDGE_WORD_CONTRACT } from "../personas.ts";
 import { buildReport } from "../swarm/aggregate.ts";
@@ -105,6 +106,9 @@ export async function swarmExecute(
   if (!read.ok) {
     return `SIBYL swarm: ${read.error}`;
   }
+  // W1 convener-recusal: assessed before the pipeline runs; the finding rides
+  // the terminal record whichever way the workers land.
+  const independence = await assessIndependence(client, directory, context.sessionID, read);
   const { record } = await store.createRun({ kind: "swarm", artifact: read.source, goal: args.goal });
 
   // --- PLAN: architect session; repair starts a FRESH architect session
@@ -215,6 +219,7 @@ export async function swarmExecute(
     status: "done",
     rounds: report.rounds,
     instrument: instrumentFace(),
+    independence,
     verdict: {
       verdict: tag,
       approvals: counts.done,
@@ -223,12 +228,13 @@ export async function swarmExecute(
       missing: counts.suspended,
     },
     notes:
-      `${judgeNote} · ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict on the artifact)` : ""}` +
+      `${judgeNote} · independence=${independence.status}${independence.status === "NOT-INDEPENDENT" ? " (self-convoked: report preserved, not in any effective path)" : ""} · ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict on the artifact)` : ""}` +
       `${noSignal ? " · zero drafts produced: instrument failure, not a verdict on the artifact" : ""} · ${report.tasks.map((t) => `${t.id}=${t.status}`).join(",")}`,
   });
 
   const lines = [
     `SIBYL SWARM: ${tag} run ${record.runId} (${deadFaceCount(dead)} rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
+    `  ${independenceLabel(independence)}`,
     ...report.tasks.map((t) => `  task: ${t.id} ${t.status}${t.sessionId === undefined ? "" : ` session=${t.sessionId}`}`),
     ...report.artifacts.map((a) => `  artifact: ${a}`),
     `  ${rulesLabel(instrumentFace())} components=${String(Object.keys(instrumentFace().components).length)}`,

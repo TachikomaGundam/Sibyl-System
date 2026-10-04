@@ -70,6 +70,17 @@ export type EngineClient = {
       query: { directory: string };
     }): Promise<{ data?: { id?: string }; error?: unknown }>;
     delete?(args: { path: { id: string } }): Promise<{ error?: unknown }>;
+    /**
+     * Read-only session header, W1 (convener-recusal): `parentID` is what lets
+     * the instrument walk the calling chain against the engine's own store —
+     * identity is resolved by the engine, never by self-report. OPTIONAL on
+     * purpose: mocks without it get the honest UNVERIFIABLE independence
+     * state (the read cannot be made, so the claim cannot be checked).
+     */
+    get?(args: { path: { id: string } }): Promise<{
+      data?: { id?: string; parentID?: string };
+      error?: unknown;
+    }>;
     prompt(args: {
       path: { id: string };
       body: {
@@ -110,7 +121,10 @@ export type EngineClient = {
           time?: { completed?: number };
           error?: unknown;
         };
-        parts?: { type: string; text?: string }[];
+        /** W1: tool parts additionally carry the tool name and its input bag
+         * (the drafting-evidence read needs write/edit targets; the salvage
+         * loop keeps reading only type/text). */
+        parts?: { type: string; text?: string; tool?: string; input?: Record<string, unknown> }[];
       }[];
       error?: unknown;
     }>;

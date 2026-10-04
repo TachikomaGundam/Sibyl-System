@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
-import { compactIso } from "./state/record.ts";
+import { compactIso, isIndependenceShape, type IndependenceRef } from "./state/record.ts";
 import { instrumentFace } from "./instrument.ts";
 import { DEFAULT_CHAMBER_LEDGER, loadLedger, spotcheckCommand, type ChamberRecord } from "./state/chamber.ts";
 import { buildVoice, renderVoice } from "./chamber/synthesis.ts";
@@ -131,9 +131,26 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
   }
 
   const now = new Date();
-  const runId = `sibyl-${compactIso(now)}-${randomBytes(2).toString("hex")}`;
+  // W1 identity fix: a launcher that already minted the run id (sibyl_review)
+  // passes it via --run-id so the LAUNCH receipt and the RUN RECORD name the
+  // same run — and the launch-context the tool staged inside the run dir is
+  // found by this process. Bare-name ids only (never a path).
+  const flagRunId = typeof flags["run-id"] === "string" ? flags["run-id"] : null;
+  if (flagRunId !== null && !/^sibyl-[A-Za-z0-9-]+$/.test(flagRunId)) {
+    return { ok: false, error: `--run-id must be a bare sibyl run id, got "${flagRunId}"` };
+  }
+  const runId = flagRunId ?? `sibyl-${compactIso(now)}-${randomBytes(2).toString("hex")}`;
   const runDir = join(laneCfg.runRoot, `sibyl-run-${runId}`);
   await mkdir(runDir, { recursive: true });
+
+  let launchIndependence: IndependenceRef | undefined;
+  try {
+    const lc = JSON.parse(await readFile(join(runDir, "launch-context.json"), "utf8")) as Record<string, unknown>;
+    if (isIndependenceShape(lc["independence"])) launchIndependence = lc["independence"];
+  } catch {
+    // no staged context (direct CLI launch): the runner records what it can —
+    // the W1 face for a headless launch is the tool-side receipt, not this file
+  }
 
   let targetPath = targetRaw;
   if (targetRaw !== "-") {
@@ -196,6 +213,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     pool: effectivePool,
     policy,
     instrument: instrumentFace(),
+    independence: launchIndependence,
     slots,
     judgePoolIds: judgePoolIds.length > 0 ? judgePoolIds : [...new Set(judgeSlotNames.map((s) => slotToId(s, effectivePool)).filter((x): x is string => x !== null))],
     lane: null as unknown as Lane, // wired below (type seam: lane needs cfg, cfg needs lane)

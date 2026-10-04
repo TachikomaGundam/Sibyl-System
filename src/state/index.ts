@@ -24,6 +24,8 @@ import {
   validateEntry,
   SIBYL_STATE_FILE_ENV,
   type CreateRunInput,
+  type IndependenceRef,
+  type IndependenceStatusTag,
   type InstrumentRef,
   type RenameFile,
   type RunKind,
@@ -34,14 +36,17 @@ import {
   type SaveOptions,
   type VerdictTag,
 } from "./record.ts";
-import { RUN_KINDS, RUN_STATUSES, VERDICT_TAGS } from "./record.ts";
+import { INDEPENDENCE_STATUSES, RUN_KINDS, RUN_STATUSES, VERDICT_TAGS } from "./record.ts";
 
 export {
   SIBYL_STATE_FILE_ENV,
+  INDEPENDENCE_STATUSES,
   RUN_KINDS,
   RUN_STATUSES,
   VERDICT_TAGS,
   type CreateRunInput,
+  type IndependenceRef,
+  type IndependenceStatusTag,
   type InstrumentRef,
   type RenameFile,
   type RunKind,
