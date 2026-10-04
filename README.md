@@ -247,3 +247,7 @@ developed under the name MAGI and renamed to Sibyl-System before its first relea
 ## License
 
 MIT
+
+## Release wheel
+
+Tags v* require a packet receipt (docs/release/<ver>.md with a real `gate: PASS` line) and a lease; after cloning run `scripts/install-hooks.sh` — hooks are per-clone and ship empty.
