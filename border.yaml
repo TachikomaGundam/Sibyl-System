@@ -1,0 +1,36 @@
+# Sibyl gate config — DRAFT for owner signature (2026-10-04, seat abathur).
+# Model: border's own dogfood config (version 1; every suppression is an
+# explicit allow entry that shows in the report's allow-hits — nothing hidden).
+version: 1
+
+targets:
+  git:
+    remotes:
+      - { name: origin, url: "git@github.com:TachikomaGundam/Sibyl-System.git" }
+
+rules:
+  authors:
+    # Single sanctioned identity, matching every commit/tagger seen in
+    # `git log --format=%ae | sort -u` for this repo (owner GitHub noreply).
+    emails:
+      - "TachikomaGundam@users.noreply.github.com"
+    names:
+      - "TachikomaGundam"
+  hosts: []
+  ips: []
+  pathPatterns:
+    - "<home>/workspace/harness/Sibyl"
+  maxFileKB: 500
+
+allow:
+  # Repo-self path detector by name, never hiding secrets.
+  - { rule: "path-pattern:<home>/workspace/harness/Sibyl", match: "*" }
+  # Test corpus is synthetic by design: planted fake keys (ABCD..7890),
+  # bot@.local ssh-shapes, regex assertion sources.
+  - { rule: "*", match: "*", file: "test/**" }
+  # Exam scenario/bell fixtures are regex/path corpora — same construction.
+  - { rule: "*", match: "*", file: "scenarios/**" }
+  # The tool's OWN signal-regex source legitimately contains the shapes it hunts.
+  - { rule: "*", match: "*", file: "src/exam/**" }
+  # The tool's own voter-gate regex source contains the shapes it hunts (line 31).
+  - { rule: "*", match: "*", file: "src/tools/consult.ts" }
