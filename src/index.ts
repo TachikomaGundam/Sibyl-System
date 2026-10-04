@@ -43,6 +43,9 @@ import type { ToolDeps } from "./tools/shared.ts";
 export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
   return {
     session: {
+      async delete(args: { path: { id: string } }) {
+        return await sdk.session.delete(args as never);
+      },
       async create(args) {
         const r = await sdk.session.create({
           body: {
