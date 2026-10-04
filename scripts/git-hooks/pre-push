@@ -39,26 +39,41 @@ block() { printf 'release-guard: %s\n' "$*" >&2; exit 1; }
 # object, non-repo cwd) is a block — fail-closed is the whole point of W4.
 obj_body() { git show "$1:$2" 2>/dev/null; }
 
+# A line is policed under EVERY release name it touches: the pushed (local)
+# ref and, for rename pushes (`git push origin refs/tags/x:refs/tags/v1.2.3`),
+# the remote ref too — the remote tag being created/updated is the artifact
+# the wheel governs, whichever local name carried it.
+police_name() { # $1=ref name to police, $2=pushed oid
+  local ref="$1" oid="$2" ver receipt_path receipt pkg pkg_ver lease_ver
+  case "$ref" in refs/tags/v*) ;; *) return 0 ;; esac
+  # zero oid on the PUSHED side = deletion of this name — always allowed
+  # (a rename that CREATES a remote tag carries a nonzero pushed oid and a
+  # zero remote oid — that creation is policed under the remote name)
+  [ "$oid" = "0000000000000000000000000000000000000000" ] && return 0
+  ver="${ref#refs/tags/}"
+  receipt_path="$RECEIPT_SUBDIR/$ver.md"
+  receipt="$(obj_body "$oid" "$receipt_path")" \
+    || block "tag $ver -> $remote: receipt $receipt_path is NOT in the pushed object (W4: worktree reads are forbidden — the tag must carry its own paperwork; git add the receipt into the released commit)"
+  printf '%s\n' "$receipt" | grep -q '^gate: PASS$' \
+    || block "receipt $receipt_path inside tag $ver lacks an exact 'gate: PASS' line — the gate decides, the receipt only records"
+  pkg="$(obj_body "$oid" "package.json")" \
+    || block "tag $ver -> $remote: package.json is not readable from the pushed object — cannot check the version against the tag name"
+  pkg_ver="$(printf '%s' "$pkg" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  [ "$pkg_ver" = "${ver#v}" ] \
+    || block "tag $ver carries package.json version \"$pkg_ver\" inside its own object — ghost-version class: the in-tag version must equal the tag name"
+  [ -f "$LEASE_FILE" ] || block "no release lease at $LEASE_FILE (scripts/release-lease.sh acquire $ver <who>)"
+  # EXACT string compare on the lease value: dots in a version are data, not
+  # regex — an unescaped grep let "v9x9x9" authorize "v9.9.9".
+  lease_ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LEASE_FILE" | head -n 1)"
+  [ "$lease_ver" = "$ver" ] \
+    || block "lease at $LEASE_FILE does not name $ver (found \"$lease_ver\") — is another seat holding the wheel?"
+}
+
 while read -r local_ref local_oid remote_ref remote_oid; do
-  case "$local_ref" in
-    refs/tags/v*)
-      # zero oid = tag deletion — always allowed
-      [ "$local_oid" = "0000000000000000000000000000000000000000" ] && continue
-      ver="${local_ref#refs/tags/}"
-      receipt_path="$RECEIPT_SUBDIR/$ver.md"
-      receipt="$(obj_body "$local_oid" "$receipt_path")" \
-        || block "tag $ver -> $remote: receipt $receipt_path is NOT in the tag object (W4: worktree reads are forbidden — the tag must carry its own paperwork; git add the receipt into the released commit)"
-      printf '%s\n' "$receipt" | grep -q '^gate: PASS$' \
-        || block "receipt $receipt_path inside tag $ver lacks an exact 'gate: PASS' line — the gate decides, the receipt only records"
-      pkg="$(obj_body "$local_oid" "package.json")" \
-        || block "tag $ver -> $remote: package.json is not readable from the tag object — cannot check the version against the tag name"
-      pkg_ver="$(printf '%s' "$pkg" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-      [ "$pkg_ver" = "${ver#v}" ] \
-        || block "tag $ver carries package.json version \"$pkg_ver\" inside its own object — ghost-version class: the in-tag version must equal the tag name"
-      [ -f "$LEASE_FILE" ] || block "no release lease at $LEASE_FILE (scripts/release-lease.sh acquire $ver <who>)"
-      grep -Eq "\"version\": ?\"$ver\"" "$LEASE_FILE" || block "lease at $LEASE_FILE does not name $ver — is another seat holding the wheel?"
-      ;;
-  esac
+  police_name "$local_ref" "$local_oid"
+  # rename pushes carry a DIFFERENT remote name; police the remote identity too
+  # (a plain same-name line double-checks the same facts — idempotent).
+  police_name "$remote_ref" "$local_oid"
 done
 
 exit 0

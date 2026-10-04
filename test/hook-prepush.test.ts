@@ -75,6 +75,7 @@ function drive(repoDir: string, lines: string[], lease: string | null): Promise<
   return new Promise((resolvePromise) => {
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: repoDir };
     delete env["SIBYL_RELEASE_RECEIPT_DIR"];
+    for (const k of Object.keys(env)) if (k.startsWith("GIT_")) delete env[k];
     env["SIBYL_RELEASE_LEASE"] = lease ?? join(repoDir, "no-such-lease.json");
     const child = execFile("bash", [HOOK, "origin", "https://gate.test.invalid/repo.git"], { cwd: repoDir, env }, (err, _stdout, stderr) => {
       void err;
@@ -104,7 +105,7 @@ test("W4-2 THE RED (receipt side): worktree-only receipt, absent in tag object �
   const lease = await leaseFor(dir, "v9.9.9");
   const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
   assert.equal(res.code, 1);
-  assert.match(res.stderr, /NOT in the tag object/);
+  assert.match(res.stderr, /NOT in the pushed object/);
 });
 
 test("W4-3 worktree receipt deleted after commit: tag object still passes (worktree never read)", async (t) => {
@@ -202,7 +203,7 @@ test("W4-11 pushed oid is the authority: second non-compliant tag object pushed 
   const lease = await leaseFor(dir, "v8.8.8");
   const res = await drive(dir, [pushLine("v8.8.8", stdout.trim())], lease);
   assert.equal(res.code, 1);
-  assert.match(res.stderr, /NOT in the tag object/);
+  assert.match(res.stderr, /NOT in the pushed object/);
 });
 
 test("W4-12 every stdin line is policed: compliant line + violating line (both orders) → refuse naming the violation", async (t) => {
@@ -246,4 +247,91 @@ test("W4-16 malformed lease JSON → refuse (never laundering a broken lease)", 
   const res = await drive(dir, [pushLine("v9.9.9", oid)], badLease);
   assert.equal(res.code, 1);
   assert.match(res.stderr, /does not name v9\.9\.9/);
+});
+
+// --- second-round locks (live council 70df findings, 2026-10-05) --------------
+
+test("W4-17 lease near-miss: dots are data — lease v9x9x9 must NOT authorize v9.9.9", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9x9x9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /does not name v9\.9\.9 \(found "v9x9x9"\)/);
+});
+
+test("W4-18 pushed oid absent from the repository → block, never crash, never pass", async (t) => {
+  const { dir } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const ghost = "b".repeat(40);
+  const res = await drive(dir, [pushLine("v9.9.9", ghost)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /NOT in the pushed object/);
+});
+
+test("W4-19 rename push polices the REMOTE identity: creating v9.9.9 from a compliant zzz object passes; from a receipt-less one refuses", async (t) => {
+  const { dir } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  // compliant variant: second tag NAME pointing at the released object
+  await git(dir, "tag", "-a", "zzz-carrier", "-m", "same release object, other name");
+  const { stdout } = await git(dir, "rev-parse", "refs/tags/zzz-carrier");
+  const good = stdout.trim();
+  // non-compliant variant: a later commit WITHOUT the receipt
+  await rm(join(dir, "docs", "release", "v9.9.9.md"));
+  await writeFile(join(dir, "package.json"), `{
+  "name": "sibyl-system",
+  "version": "9.9.9"
+}
+`, "utf8");
+  await git(dir, "add", "-A");
+  await git(dir, "commit", "--quiet", "-m", "receipt removed");
+  await git(dir, "commit", "--quiet", "--allow-empty", "-m", "keep head detached from tag");
+  await git(dir, "tag", "-a", "bad-carrier", "-m", "receipt-less object", "HEAD~1");
+  const { stdout: badOut } = await git(dir, "rev-parse", "refs/tags/bad-carrier");
+  const bad = badOut.trim();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const pass = await drive(dir, [`refs/tags/zzz-carrier ${good} refs/tags/v9.9.9 ${ZERO}`], lease);
+  assert.equal(pass.crashed, false, pass.stderr);
+  assert.equal(pass.code, 0, pass.stderr);
+  const refuse = await drive(dir, [`refs/tags/bad-carrier ${bad} refs/tags/v9.9.9 ${ZERO}`], lease);
+  assert.equal(refuse.code, 1);
+  assert.match(refuse.stderr, /tag v9\.9\.9/);
+});
+
+test("W4-20 receipt BODY divergence: object carries gate: FAIL while worktree tampered to gate: PASS → refuse (read from object)", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true, receiptGate: "gate: FAIL" });
+  await writeFile(join(dir, "docs", "release", "v9.9.9.md"), receiptBody("v9.9.9"), "utf8"); // tampered copy on disk
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /gate: PASS/);
+});
+
+test("W4-21 applicability table: exactly the documented names are policed", async (t) => {
+  const { dir } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: false });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const { stdout } = await git(dir, "rev-parse", "HEAD");
+  const head = stdout.trim();
+  const line = (ref: string, remote = ref) => `${ref} ${head} ${remote} ${ZERO}`;
+  const exempt = [line("refs/heads/main"), line("refs/tags/notes-x"), line("refs/tags/V9.9.9"), line("refs/notes/commits")];
+  for (const l of exempt) {
+    const res = await drive(dir, [l], null);
+    assert.equal(res.code, 0, `must be exempt: ${l}`);
+  }
+  for (const l of [line("refs/tags/v9.9.9"), line("refs/heads/x", "refs/tags/v9.9.9")]) {
+    const res = await drive(dir, [l], null);
+    assert.equal(res.code, 1, `must be policed: ${l}`);
+  }
+});
+
+test("W4-14b update push fully compliant (nonzero remote oid) → pass", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [`refs/tags/v9.9.9 ${oid} refs/tags/v9.9.9 ${"2".repeat(40)}`], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 0, res.stderr);
 });
