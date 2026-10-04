@@ -3,24 +3,41 @@
 # .git/hooks/pre-push — re-copy after fresh clones; hooks are not cloned).
 #
 # Law (human-approved 2026-09-30, dual-vehicle collision of npm 0.2.6):
-#   pushing a NEW or UPDATED refs/tags/v* requires a packet receipt in the
-#   pushing worktree AND a matching release lease. Deletions always pass
+#   pushing a NEW or UPDATED refs/tags/v* requires the packet receipt INSIDE
+#   the pushed tag object AND a matching release lease. Deletions always pass
 #   (retiring a bad tag must never need paperwork). Non-release refs pass.
 #
-# Receipt  : docs/release/<version>.md  (override: SIBYL_RELEASE_RECEIPT_DIR)
-#            must contain the line:      gate: PASS
-# Lease    : ~/.config/abathur/release-lease.json  (override: SIBYL_RELEASE_LEASE)
+# W4 (2026-10-04, root cause of the fourth red): the receipt and the package
+#   version are read ONLY from the pushed tag's object body via
+#   `git show <oid>:<path>`. Reading the working tree is forbidden: a worktree
+#   read blesses a tag that does not carry its own paperwork — the exact
+#   failure "receipt on disk, absent inside the tag". The tag object IS the
+#   release; if the fact is not in it, the fact does not exist for this gate.
+#
+# Receipt  : docs/release/<version>.md inside the tag object
+#            (tree-relative dir override: SIBYL_RELEASE_RECEIPT_DIR)
+#            must contain a line starting with:  gate: PASS
+# Version  : package.json "version" inside the tag object must equal the tag
+#            name minus the leading "v" — the ghost-version class, killed by
+#            comparing tag-body facts against the ref being pushed.
+# Lease    : ~/.config/sibyl/release-lease.json  (override: SIBYL_RELEASE_LEASE)
 #            must name "version":"<version>"
-# Fail-open ONLY on ref lines we do not police. Every refusal names the file it looked for.
+#            (operator-local coordination state lives OUTSIDE git by design;
+#            it is not release content and has no tag-object form.)
+# Fail-open ONLY on ref lines we do not police. Every refusal names what it
+# looked for and where.
 
 remote="$1"
 url="$2"
 
-top="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-RECEIPT_DIR="${SIBYL_RELEASE_RECEIPT_DIR:-$top/docs/release}"
 LEASE_FILE="${SIBYL_RELEASE_LEASE:-$HOME/.config/sibyl/release-lease.json}"
+RECEIPT_SUBDIR="${SIBYL_RELEASE_RECEIPT_DIR:-docs/release}"
 
 block() { printf 'release-guard: %s\n' "$*" >&2; exit 1; }
+
+# Read a path from the pushed object's body. Any failure (missing path, bad
+# object, non-repo cwd) is a block — fail-closed is the whole point of W4.
+obj_body() { git show "$1:$2" 2>/dev/null; }
 
 while read -r local_ref local_oid remote_ref remote_oid; do
   case "$local_ref" in
@@ -28,9 +45,16 @@ while read -r local_ref local_oid remote_ref remote_oid; do
       # zero oid = tag deletion — always allowed
       [ "$local_oid" = "0000000000000000000000000000000000000000" ] && continue
       ver="${local_ref#refs/tags/}"
-      receipt="$RECEIPT_DIR/$ver.md"
-      [ -f "$receipt" ] || block "tag $ver -> $remote: no packet receipt $receipt (write it from docs/release/TEMPLATE.md with the border PASS transcript)"
-      grep -q '^gate: PASS' "$receipt" || block "receipt $receipt lacks a 'gate: PASS' line — the gate decides, the receipt only records"
+      receipt_path="$RECEIPT_SUBDIR/$ver.md"
+      receipt="$(obj_body "$local_oid" "$receipt_path")" \
+        || block "tag $ver -> $remote: receipt $receipt_path is NOT in the tag object (W4: worktree reads are forbidden — the tag must carry its own paperwork; git add the receipt into the released commit)"
+      printf '%s\n' "$receipt" | grep -q '^gate: PASS' \
+        || block "receipt $receipt_path inside tag $ver lacks a 'gate: PASS' line at line start — the gate decides, the receipt only records"
+      pkg="$(obj_body "$local_oid" "package.json")" \
+        || block "tag $ver -> $remote: package.json is not readable from the tag object — cannot check the version against the tag name"
+      pkg_ver="$(printf '%s' "$pkg" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+      [ "$pkg_ver" = "${ver#v}" ] \
+        || block "tag $ver carries package.json version \"$pkg_ver\" inside its own object — ghost-version class: the in-tag version must equal the tag name"
       [ -f "$LEASE_FILE" ] || block "no release lease at $LEASE_FILE (scripts/release-lease.sh acquire $ver <who>)"
       grep -Eq "\"version\": ?\"$ver\"" "$LEASE_FILE" || block "lease at $LEASE_FILE does not name $ver — is another seat holding the wheel?"
       ;;
