@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -190,4 +190,34 @@ test("swarm nests architect, worker and judge sessions under the caller", async 
   await swarmExecute(deps, { artifact: "a\nb", goal: "g", judge: true }, ctx);
   assert.ok(creates.length >= 4, `expected architect+2 workers+judge, got ${String(creates.length)}`);
   for (const c of creates) assert.equal(c.parentID, "ses_caller");
+});
+
+// --- W2 absence-as-disability locks (2026-10-04 handoff) ----------------------
+
+test("W2 swarm face: TERMINALS.txt carries a row per task; receipt line one shows the count", async () => {
+  const { deps, ctx, store } = await fixture(happyScript());
+  const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);
+  assert.ok(out.startsWith("SIBYL SWARM: APPROVE run sibyl-"), out.slice(0, 80));
+  assert.ok(out.includes("(dead-without-record=0 rounds="), out.slice(0, 120));
+  const run = await oneRun(store);
+  const rows = await readFile(join(run.spaceDir, "TERMINALS.txt"), "utf8");
+  assert.match(rows, /task=t1 worker=worker-0-t1 status=ok session=sess-\d+ detail=draft=/);
+  assert.match(rows, /task=t2 worker=worker-1-t2 status=ok session=sess-\d+ detail=draft=/);
+});
+
+test("W2 dead-without-record: unrecordable rows force CANNOT_ANSWER, never a vote", async () => {
+  const { deps, ctx, store } = await fixture(happyScript());
+  const orig = store.createRun.bind(store);
+  store.createRun = async (input) => {
+    const r = await orig(input);
+    await mkdir(join(r.spaceDir, "TERMINALS.txt")); // the row file is a directory: append and read-back both fail
+    return r;
+  };
+  const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);
+  assert.ok(out.includes("SIBYL SWARM: CANNOT_ANSWER"), out.slice(0, 80));
+  assert.ok(out.includes("dead-without-record=2"), out.slice(0, 120));
+  const run = await oneRun(store);
+  assert.equal(run.verdict?.verdict, "CANNOT_ANSWER");
+  assert.ok(run.verdict !== undefined && run.verdict.rejects === 0, "dead seats must not fold into any vote");
+  assert.ok(run.notes?.includes("left no terminal row"), run.notes);
 });

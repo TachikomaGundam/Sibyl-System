@@ -113,7 +113,7 @@ test("consult 2R/1A: fail-closed REJECT summary, done record, per-voter reply fi
   });
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "ship safely" }, { directory: "/srv/work", abort: new AbortController().signal, sessionID: "ses_caller" } satisfies ToolContextLike);
 
-  assert.ok(out.startsWith("SIBYL CONSULT: REJECT (votes 1A/2R/0E/0M) run sibyl-"), out.slice(0, 80));
+  assert.ok(out.startsWith("SIBYL CONSULT: REJECT (dead-without-record=0 votes 1A/2R/0E/0M) run sibyl-"), out.slice(0, 80));
   assert.ok(out.includes("reason: melchior: correctness hole"), out);
   assert.ok(out.includes("must_fix: close the race"), out);
   assert.ok(out.includes("must_fix: justify complexity"), out);
@@ -147,7 +147,7 @@ test("consult repair: unparseable voter gets ONE in-session JSON-only follow-up"
   });
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
-  assert.ok(out.startsWith("SIBYL CONSULT: APPROVE (votes 2A/1R/0E/0M)"), out.slice(0, 60));
+  assert.ok(out.startsWith("SIBYL CONSULT: APPROVE (dead-without-record=0 votes 2A/1R/0E/0M)"), out.slice(0, 60));
   assert.equal(prompts.length, 4); // 3 ballots + 1 repair
   const repair = prompts[3];
   assert.ok(repair !== undefined);
@@ -168,7 +168,7 @@ test("consult repair failure: second garbage reply becomes an ERROR ballot, neve
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
   assert.ok(out.includes("verdict-unparseable"), out);
-  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 1A/1R/1E/0M)"), out.slice(0, 70));
+  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (dead-without-record=0 votes 1A/1R/1E/0M)"), out.slice(0, 70));
   assert.ok(out.includes("NOT a substantive reject"), out);
   assert.equal(prompts.length, 4); // exactly ONE repair shot, never a second
   const run = (await loadRuns(deps.store))[0];
@@ -183,7 +183,7 @@ test("consult engine failure: errored voter leaves the seat unanswered (2A+1E ->
   });
   const out = await consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: "/w", abort: new AbortController().signal, sessionID: "ses_caller" });
 
-  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (votes 2A/0R/1E/0M)"), out.slice(0, 70));
+  assert.ok(out.startsWith("SIBYL CONSULT: CANNOT_ANSWER (dead-without-record=0 votes 2A/0R/1E/0M)"), out.slice(0, 70));
   assert.ok(out.includes("MELCHIOR errored"), out);
 
   const run = (await loadRuns(deps.store))[0];

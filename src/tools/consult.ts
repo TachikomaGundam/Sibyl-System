@@ -11,13 +11,14 @@
 // boundary; every failure surfaces as a readable string.
 
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 
 import { tool } from "@opencode-ai/plugin";
 
 import { COUNCILORS, tallyVotes } from "../council/index.ts";
 import type { CouncilorId, CouncilVote } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
+import { classifyFailure, deadFaceCount, deadWithoutRecord, formatTerminalRow, parseTerminalRows } from "../terminal.ts";
 import { parseVerdict } from "../verdict/index.ts";
 import { PERSONAS } from "../personas.ts";
 import type { RunRecord } from "../state/index.ts";
@@ -47,6 +48,7 @@ type VoterOutcome = {
   id: CouncilorId;
   vote: CouncilVote;
   replyPath: string;
+  sessionId: string;
   modelApplied: string | null;
   latencyMs: number;
 };
@@ -98,7 +100,7 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
     const error = `${result.stage ?? "engine"}: ${result.error ?? "unknown error"}`;
     const vote: CouncilVote = { id, ok: false, error };
     const replyAt = await safeWrite(replyPath, renderReply(id, "(no reply — engine call failed)", `ballot: ERROR ${error}`));
-    return { id, vote, replyPath: replyAt, modelApplied: result.modelApplied, latencyMs: result.latencyMs };
+    return { id, vote, replyPath: replyAt, sessionId: result.sessionID, modelApplied: result.modelApplied, latencyMs: result.latencyMs };
   }
 
   // parseVerdict's single repair shot: a follow-up prompt INTO THIS voter's own
@@ -127,7 +129,7 @@ async function castVote(job: VoteJob): Promise<VoterOutcome> {
     : `ballot: ${verdict.verdict} (confidence ${String(verdict.confidence)}) · ` +
       `session ${result.sessionID} · model ${result.modelApplied ?? "host-picked"} · ${String(result.latencyMs)}ms`;
   const replyAt = await safeWrite(replyPath, renderReply(id, result.text, meta));
-  return { id, vote, replyPath: replyAt, modelApplied: result.modelApplied, latencyMs: result.latencyMs };
+  return { id, vote, replyPath: replyAt, sessionId: result.sessionID, modelApplied: result.modelApplied, latencyMs: result.latencyMs };
 }
 
 async function safeWrite(path: string, text: string): Promise<string> {
@@ -185,25 +187,53 @@ export async function consultExecute(
 
   const tally = tallyVotes(outcomes.map((o) => o.vote));
 
+  // W2 absence-as-disability: every seat must leave a terminal row in
+  // TERMINALS.txt (ok|error|timeout) before the tally is honored. A seat
+  // whose row cannot be written is dead-without-record: named on the receipt
+  // face, forcing CANNOT_ANSWER — never folded into any vote either way.
+  const terminalsPath = join(record.spaceDir, "TERMINALS.txt");
+  await Promise.all(
+    outcomes.map((o) => {
+      const vote = o.vote;
+      const status = "missing" in vote ? "error" : vote.ok ? "ok" : classifyFailure(vote.error);
+      const detail = "missing" in vote || !vote.ok ? `ballot=${ballotTag(vote)}` : `ballot=${vote.verdict.verdict}`;
+      const line = formatTerminalRow(new Date(), {
+        task: o.id,
+        worker: o.id,
+        status,
+        session: o.sessionId,
+        detail,
+      });
+      return appendFile(terminalsPath, `${line}\n`, "utf8").catch((err: unknown) => {
+        console.error(`[sibyl consult] terminal row for ${o.id} failed to write: ${errMessage(err)}`);
+      });
+    }),
+  );
+  // Read-back authority: a seat is recorded only if its row parses out of the
+  // file AFTER the append wave — a write that lied counts as dead too.
+  const rows = parseTerminalRows(await readFile(terminalsPath, "utf8").catch(() => ""));
+  const dead = deadWithoutRecord([...COUNCILORS], rows);
+  const effectiveVerdict = dead.length > 0 ? "CANNOT_ANSWER" : tally.verdict;
+
   const finalRecord: RunRecord = {
     ...record,
     status: "done",
     updatedAt: new Date().toISOString(),
     verdict: {
-      verdict: tally.verdict,
+      verdict: effectiveVerdict,
       approvals: tally.approvals,
       rejects: tally.rejects,
       errors: tally.errors,
       missing: tally.missing,
     },
     notes:
-      `policy=${tally.policy} ` +
+      `policy=${tally.policy} ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict)` : ""} ` +
       outcomes.map((o) => `${o.id}=${ballotTag(o.vote)} reply=${o.replyPath}`).join(" · "),
   };
   await deps.store.appendOrUpdate(finalRecord);
 
   const lines: string[] = [
-    `SIBYL CONSULT: ${tally.verdict} (votes ${String(tally.approvals)}A/${String(tally.rejects)}R/${String(tally.errors)}E/${String(tally.missing)}M) run ${record.runId}`,
+    `SIBYL CONSULT: ${effectiveVerdict} (${deadFaceCount(dead)} votes ${String(tally.approvals)}A/${String(tally.rejects)}R/${String(tally.errors)}E/${String(tally.missing)}M) run ${record.runId}`,
     ...tally.reasons.map((r) => `  reason: ${r}`),
     ...tally.must_fix.map((m) => `  must_fix: ${m}`),
     ...outcomes.map((o) => `  reply: ${o.id} -> ${o.replyPath}`),

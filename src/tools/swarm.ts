@@ -11,9 +11,11 @@
 // failure lands as `status:"failed"` on the run record and a readable string.
 
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 
 import { tool } from "@opencode-ai/plugin";
+
+import { deadFaceCount, deadWithoutRecord, parseTerminalRows } from "../terminal.ts";
 
 import { COUNCILORS } from "../council/index.ts";
 import { runPersona } from "../engine/index.ts";
@@ -161,6 +163,7 @@ export async function swarmExecute(
         return `<${path} write failed: ${errMessage(err)}>`;
       }
     },
+    writeTerminal: (line) => appendFile(join(record.spaceDir, "TERMINALS.txt"), `${line}\n`, "utf8"),
   });
   if (!dispatch.ok) return failRun(deps, record, { stage: "dispatch", error: dispatch.error });
 
@@ -197,22 +200,33 @@ export async function swarmExecute(
   // NO vote. Zero completed tasks = no signal -> CANNOT_ANSWER, never a
   // verdict on the artifact. Fail-closed kept: APPROVE still requires all done.
   const noSignal = counts.done === 0;
-  const tag = noSignal ? "CANNOT_ANSWER" : report.verdict === "APPROVE" ? "APPROVE" : "REJECT";
+  // W2 absence-as-disability gate (2026-10-04 campaign, 8 workers 7 dead):
+  // every declared task must have left a terminal row in TERMINALS.txt.
+  // A declared seat without its row is dead-without-record: it is named on
+  // the receipt face and forces CANNOT_ANSWER — never folded into any vote.
+  const terminalsText = await readFile(join(record.spaceDir, "TERMINALS.txt"), "utf8").catch(() => "");
+  const dead = deadWithoutRecord(
+    plan.schema.tasks.map((t) => t.id),
+    parseTerminalRows(terminalsText),
+  );
+  const tag = dead.length > 0 || noSignal ? "CANNOT_ANSWER" : report.verdict === "APPROVE" ? "APPROVE" : "REJECT";
   await finishRun(deps, record, {
     status: "done",
     rounds: report.rounds,
     verdict: {
       verdict: tag,
       approvals: counts.done,
-      rejects: noSignal ? 0 : tag === "REJECT" ? 1 : 0,
+      rejects: noSignal || dead.length > 0 ? 0 : tag === "REJECT" ? 1 : 0,
       errors: counts.failed,
       missing: counts.suspended,
     },
-    notes: `${judgeNote}${noSignal ? " · zero drafts produced: instrument failure, not a verdict on the artifact" : ""} · ${report.tasks.map((t) => `${t.id}=${t.status}`).join(",")}`,
+    notes:
+      `${judgeNote} · ${deadFaceCount(dead)}${dead.length > 0 ? ` (${dead.join(",")} left no terminal row: instrument wounded, not a verdict on the artifact)` : ""}` +
+      `${noSignal ? " · zero drafts produced: instrument failure, not a verdict on the artifact" : ""} · ${report.tasks.map((t) => `${t.id}=${t.status}`).join(",")}`,
   });
 
   const lines = [
-    `SIBYL SWARM: ${tag} run ${record.runId} (rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
+    `SIBYL SWARM: ${tag} run ${record.runId} (${deadFaceCount(dead)} rounds=${String(report.rounds)} done=${String(counts.done)} failed=${String(counts.failed)} suspended=${String(counts.suspended)} ${judgeNote})`,
     ...report.tasks.map((t) => `  task: ${t.id} ${t.status}${t.sessionId === undefined ? "" : ` session=${t.sessionId}`}`),
     ...report.artifacts.map((a) => `  artifact: ${a}`),
     `  space: ${record.spaceDir}`,
