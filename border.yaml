@@ -34,3 +34,5 @@ allow:
   - { rule: "*", match: "*", file: "src/exam/**" }
   # The tool's own voter-gate regex source contains the shapes it hunts (line 31).
   - { rule: "*", match: "*", file: "src/tools/consult.ts" }
+  # Gate config necessarily names the machine path it guards (self-detection, not a secret).
+  - { rule: "*", match: "*", file: "border.yaml" }
