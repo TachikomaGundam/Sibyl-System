@@ -2,15 +2,19 @@
 // drafting kinship) consults on the hardened W4 suite. Expect
 // independence=INDEPENDENT so the ballot legitimately enters the effective
 // path; its verdict is recorded and read back here.
+import { homedir } from "node:os";
 import { createOpencodeClient } from "@opencode-ai/sdk";
-import { consultExecute } from "<home>/workspace/harness/Sibyl/src/tools/consult.ts";
-import { parseOptions } from "<home>/workspace/harness/Sibyl/src/options.ts";
-import { toEngineClient } from "<home>/workspace/harness/Sibyl/src/index.ts";
-import { RunStore } from "<home>/workspace/harness/Sibyl/src/state/index.ts";
-const DIR = "<home>/workspace/harness/Sibyl";
-const ART = `${DIR}/test/hook-prepush.test.ts`;
-const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:19923" });
-const parsed = parseOptions({ modelPool: { default: { providerID: "local-qwen", modelID: "qwen3.8-flash-next" } }, timeoutMs: 480_000 });
+const SEAT = process.env["SIBYL_E2E_SEAT"] ?? homedir();
+const REPO = `${SEAT}/workspace/harness/Sibyl`;
+import { consultExecute } from `${REPO}/src/tools/consult.ts`;
+import { parseOptions } from `${REPO}/src/options.ts`;
+import { toEngineClient } from `${REPO}/src/index.ts`;
+import { RunStore } from `${REPO}/src/state/index.ts`;
+const DIR = REPO;
+const ART = `${REPO}/test/hook-prepush.test.ts`;
+const BASE = process.env["SIBYL_E2E_BASE"] ?? "http://127.0.0.1:CHANGE-ME";
+const client = createOpencodeClient({ baseUrl: BASE });
+const parsed = parseOptions({ modelPool: { default: { providerID: process.env["SIBYL_E2E_PROVIDER"] ?? "", modelID: process.env["SIBYL_E2E_MODEL"] ?? "" } }, timeoutMs: 480_000 });
 if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 const created = await client.session.create({ body: { title: "w1-independent-reviewer" }, query: { directory: DIR } });
 const sid = created.data?.id;
