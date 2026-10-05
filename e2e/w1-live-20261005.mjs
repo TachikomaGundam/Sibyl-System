@@ -1,26 +1,29 @@
 // W1 live e2e v3 (2026-10-05): replay the REAL incident store on a temporary
-// `opencode serve` (19923). POSITIVE (run f68c, completed): this seat's root
+// (ephemeral port via SIBYL_E2E_BASE). POSITIVE (run f68c, completed): this seat's root
 // session convened a consult on a file its own chain wrote -> the instrument
 // stamped NOT-INDEPENDENT with the write-part citation (the 91fc incident
 // shape, refused live). CONTROL (this leg): a fresh root session with no
 // drafting history convenes the same consult -> must read INDEPENDENT.
 // A prior control attempt froze at `running` when the driving shell died —
 // that record is kept (honest face) and its session deleted after this leg.
+import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 import { createOpencodeClient } from "@opencode-ai/sdk";
 
-import { consultExecute } from "<home>/workspace/harness/Sibyl/src/tools/consult.ts";
-import { parseOptions } from "<home>/workspace/harness/Sibyl/src/options.ts";
-import { toEngineClient } from "<home>/workspace/harness/Sibyl/src/index.ts";
-import { RunStore } from "<home>/workspace/harness/Sibyl/src/state/index.ts";
+const SEAT = process.env["SIBYL_E2E_SEAT"] ?? homedir();
+const REPO = `${SEAT}/workspace/harness/Sibyl`;
+import { consultExecute } from `${REPO}/src/tools/consult.ts`;
+import { parseOptions } from `${REPO}/src/options.ts`;
+import { toEngineClient } from `${REPO}/src/index.ts`;
+import { RunStore } from `${REPO}/src/state/index.ts`;
 
-const BASE = "http://127.0.0.1:19923";
-const DIR = "<home>/workspace/harness/Sibyl";
-const ART_PATH = "<home>/workspace/harness/Sibyl/test/hook-prepush.test.ts";
+const BASE = process.env["SIBYL_E2E_BASE"] ?? "http://127.0.0.1:CHANGE-ME";
+const DIR = REPO;
+const ART_PATH = `${REPO}/test/hook-prepush.test.ts`;
 const OLD_CONTROL = process.argv[2];
 
 const client = createOpencodeClient({ baseUrl: BASE });
-const parsed = parseOptions({ modelPool: { default: { providerID: "local-qwen", modelID: "qwen3.8-flash-next" } }, timeoutMs: 480_000 });
+const parsed = parseOptions({ modelPool: { default: { providerID: process.env["SIBYL_E2E_PROVIDER"] ?? "", modelID: process.env["SIBYL_E2E_MODEL"] ?? "" } }, timeoutMs: 480_000 });
 if (!parsed.ok) throw new Error(`options: ${parsed.errors.join("; ")}`);
 const engine = toEngineClient(client);
 const store = new RunStore();
