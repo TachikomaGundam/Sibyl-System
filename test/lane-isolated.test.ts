@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   collectSessionDb,
   composeRunArgs,
+  composeSandboxArgs,
   extractSessionId,
   killRole,
   launchRole,
@@ -162,4 +163,42 @@ test("seatOrDeny: cloud seat denies before any spawn machinery is reached", () =
   const d = seatOrDeny("pro", "default", pool, { allowedPrefixes: ["local-"] });
   assert.ok(!d.ok);
   assert.match(d.deny, /modelPolicy/);
+});
+
+// --- exam venue sandbox (2026-10-05 grader-leak wound fix) ---------------------
+
+test("composeSandboxArgs: ro root, dev, tmpfs masks, then keep rebinds (dir-parent first), then -- and the inner argv", () => {
+  const argv = composeSandboxArgs({
+    bwrapBin: "/usr/bin/bwrap",
+    maskDirs: ["/home/me/workspace", "/tmp"],
+    keepDirs: ["/tmp/sibyl-run-x"],
+    bin: "/abs/opencode",
+    args: ["run", "--title", "t"],
+  });
+  assert.equal(argv[0], "/usr/bin/bwrap");
+  const j = (tok: string): number => argv.indexOf(tok);
+  assert.ok(j("--ro-bind") < j("--dev"), "root read-only before anything");
+  assert.ok(j("--tmpfs") < j("--dir"), "masks applied before keeps");
+  const keep = j("--dir");
+  assert.equal(argv[keep], "--dir");
+  assert.equal(argv[keep + 1], "/tmp");
+  assert.equal(argv[keep + 2], "--bind");
+  assert.equal(argv[keep + 3], "/tmp/sibyl-run-x");
+  assert.ok(j("--") < argv.indexOf("/abs/opencode"));
+  assert.deepEqual(argv.slice(argv.indexOf("--") + 1), ["/abs/opencode", "run", "--title", "t"]);
+});
+
+test("launchRole sandbox preflight: missing bwrap falls back to direct spawn and SAYS sandboxed=false", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-sbx-fallback-"));
+  const cfg: LaneConfig = {
+    runDir: dir,
+    opencodeBin: "/bin/true",
+    configSource: "",
+    sandboxMaskDirs: ["/some/where"],
+    bwrapBin: join(dir, "no-such-bwrap"),
+  };
+  const out = await launchRole(cfg, "candidate", { title: "x", modelId: "p/m", message: "hi", timeoutMs: 5_000, launchId: "t1" });
+  assert.equal(out.sandboxed, false, "no bwrap -> honest unsandboxed flag");
+  assert.equal(out.ok, true, out.error ?? "");
+  assert.equal(out.rc, 0);
 });

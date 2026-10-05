@@ -18,12 +18,13 @@
 
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { compactIso, isIndependenceShape, type IndependenceRef } from "./state/record.ts";
 import { instrumentFace } from "./instrument.ts";
-import { DEFAULT_CHAMBER_LEDGER, loadLedger, spotcheckCommand, type ChamberRecord } from "./state/chamber.ts";
+import { DEFAULT_CHAMBER_LEDGER, listChecksumTargets, loadLedger, spotcheckCommand, writeChecksums, type ChamberRecord } from "./state/chamber.ts";
 import { buildVoice, renderVoice } from "./chamber/synthesis.ts";
 import { runChamber, type ChamberConfig, type ChamberRole, type Lane, type LaunchFacts } from "./chamber/protocol.ts";
 import { launchRole, collectSessionDb, killRole, type LaneConfig } from "./lane/isolated.ts";
@@ -75,6 +76,7 @@ export type ResolvedRun = {
   chamber: ChamberConfig | null;
   exam: { scenarios: ScenarioSpec[]; modelId: string } | null;
   killInjection: { role: ChamberRole; afterMs: number } | null;
+  examMaskDirs: string[];
 };
 
 /** Build every run parameter from flags + (optional) plugin-options config
@@ -186,7 +188,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     if (scenarios.length === 0) return { ok: false, error: "--profile exam needs at least one --scenario" };
     const only = splitModelId(modelFlag ?? "") ?? null;
     if (only === null) return { ok: false, error: "--profile exam requires --model provider/model" };
-    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection } };
+    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
   }
   if (profile !== "review") return { ok: false, error: `unknown --profile ${profile}` };
 
@@ -219,7 +221,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     lane: null as unknown as Lane, // wired below (type seam: lane needs cfg, cfg needs lane)
   };
   chamber.lane = makeIsolatedLane(chamber, laneCfg, timeoutMs);
-  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber, exam: null, killInjection } };
+  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber, exam: null, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
 }
 
 function slotToId(slot: string, pool: Record<string, { providerID: string; modelID: string }>): string | null {
@@ -246,8 +248,8 @@ function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: numb
   };
 }
 
-function makeExamDriver(laneCfgBase: LaneBase, runDir: string, modelId: string, timeoutMs: number): CandidateDriver {
-  const lc: LaneConfig = { runDir, opencodeBin: laneCfgBase.opencodeBin, configSource: laneCfgBase.configSource };
+function makeExamDriver(laneCfgBase: LaneBase, runDir: string, modelId: string, timeoutMs: number, maskDirs: readonly string[], bwrapProbe: string): { driver: CandidateDriver; sandboxed: boolean } {
+  const lc: LaneConfig = { runDir, opencodeBin: laneCfgBase.opencodeBin, configSource: laneCfgBase.configSource, sandboxMaskDirs: maskDirs, bwrapBin: bwrapProbe };
   let turnNo = 0;
   const run = async (message: string, resume?: string) => {
     turnNo += 1;
@@ -264,12 +266,15 @@ function makeExamDriver(laneCfgBase: LaneBase, runDir: string, modelId: string, 
     return { facts: { ok: o.ok, rc: o.rc, signal: o.signal, timedOut: o.timedOut }, transcript, sessionId: o.sessionId };
   };
   return {
-    start: async (prompt) => await run(prompt),
-    continueTurn: async (sid, message) => await run(message, sid),
+    sandboxed: maskDirs.length > 0 && existsSync(bwrapProbe),
+    driver: {
+      start: async (prompt) => await run(prompt),
+      continueTurn: async (sid, message) => await run(message, sid),
+    },
   };
 }
 
-export function examVoice(results: ExamResult[], runId: string, runDir: string): string {
+export function examVoice(results: ExamResult[], runId: string, runDir: string, venueSandbox: string): string {
   const lines = ["SIBYL — ONE CONCLUSION, ONE VOICE  [SIBYL-ONE-VOICE]"];
   let anyFail = false;
   let anyHuman = false;
@@ -283,6 +288,7 @@ export function examVoice(results: ExamResult[], runId: string, runDir: string):
   const conclusion = anyFail ? "REJECT" : anyHuman ? "NEEDS_HUMAN" : "APPROVE";
   lines.splice(1, 0, `conclusion: ${conclusion}  terminal: CONVERGED  run: ${runId}`);
   lines.push(`honesty: PERFORMANCE-ONLY-IN-LOOP (single-uid box until C-09/C-14 rulings)`);
+  lines.push(`venue sandbox: ${venueSandbox}`);
   lines.push(`verify every recorded byte: ${spotcheckCommand(runDir)}`);
   return lines.join("\n");
 }
@@ -344,7 +350,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       return 0;
     }
     if (run.exam !== null) {
-      const driver = makeExamDriver(run.laneCfg, run.runDir, run.exam.modelId, run.timeoutMs);
+      const { driver, sandboxed } = makeExamDriver(run.laneCfg, run.runDir, run.exam.modelId, run.timeoutMs, run.examMaskDirs, "/usr/bin/bwrap");
       const results: ExamResult[] = [];
       const scPaths = typeof flags["scenario"] === "string" ? [flags["scenario"]] : [];
       if (flags["allow-unbellied"] !== true) {
@@ -355,7 +361,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         }
       }
       for (const sc of run.exam.scenarios) results.push(await runExamScenario(sc, run.runDir, driver));
-      console.log(examVoice(results, run.runId, run.runDir));
+      // exam runs now seal their face too: the ONE-VOICE verify line must be true
+      await writeChecksums(run.runDir, await listChecksumTargets(run.runDir));
+      console.log(examVoice(results, run.runId, run.runDir, sandboxed ? `ON (masked ${String(run.examMaskDirs.length)} dir(s))` : run.examMaskDirs.length === 0 ? "OFF (lane.examMaskDirs empty — grader files are candidate-readable)" : "OFF (bwrap missing at /usr/bin/bwrap)"));
       return 0;
     }
     return 2;

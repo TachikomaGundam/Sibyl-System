@@ -200,3 +200,14 @@ test("v1.1 sections: hostile values fail loud (never silently default)", () => {
   const good = parseOptions({ modelPolicy: { allowedPrefixes: ["local-", "ollama-"] } });
   assert.ok(good.ok);
 });
+
+test("lane.examMaskDirs: default [], accepts arrays, rejects non-string entries (unknown-key loudness preserved)", () => {
+  const ok = parseOptions({ lane: { examMaskDirs: ["/home/me/workspace", "/tmp"] } });
+  assert.ok(ok.ok);
+  if (ok.ok) assert.deepEqual(ok.options.lane.examMaskDirs, ["/home/me/workspace", "/tmp"]);
+  const def = parseOptions({});
+  assert.ok(def.ok);
+  if (def.ok) assert.deepEqual(def.options.lane.examMaskDirs, []);
+  const bad = parseOptions({ lane: { examMaskDirs: ["/ok", 7] } });
+  assert.ok(!bad.ok, "non-string mask entry must be a named config error, never a silent drop");
+});

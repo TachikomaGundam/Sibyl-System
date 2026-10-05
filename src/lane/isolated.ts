@@ -25,7 +25,36 @@ export type LaneConfig = {
   opencodeBin: string;
   configSource: string;
   pinnedPath?: string;
+  /** exam venue (2026-10-05 leak wound: a candidate could read the grader's
+   * scenario files from the shared filesystem): absolute dirs to tmpfs-mask
+   * inside the candidate sandbox. Empty/undefined = unsandboxed (the venue
+   * says so plainly on the voice face — no silent half-measures). */
+  sandboxMaskDirs?: readonly string[];
+  /** test seam: which bwrap binary to probe (default /usr/bin/bwrap) */
+  bwrapBin?: string;
 };
+
+/** Pure sandbox argv builder (unit-testable without spawning). The candidate
+ * sees a read-only root with the mask dirs emptied, EXCEPT the run dir itself,
+ * rebound on top of any masked parent (dir-parent first, then bind). */
+export function composeSandboxArgs(opts: {
+  bwrapBin: string;
+  maskDirs: readonly string[];
+  keepDirs: readonly string[];
+  bin: string;
+  args: readonly string[];
+}): string[] {
+  const argv = [opts.bwrapBin, "--ro-bind", "/", "/", "--dev", "/dev", "--die-with-parent"];
+  for (const m of opts.maskDirs) argv.push("--tmpfs", m);
+  for (const k of opts.keepDirs) argv.push("--dir", posixDirname(k), "--bind", k, k);
+  argv.push("--", opts.bin, ...opts.args);
+  return argv;
+}
+
+function posixDirname(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i <= 0 ? "/" : p.slice(0, i);
+}
 
 export type RolePaths = {
   roleDir: string;
@@ -121,6 +150,8 @@ export type LaunchOutcome = {
   startedAt: string;
   endedAt: string;
   error?: string;
+  /** true only when the launch actually ran inside the bwrap sandbox */
+  sandboxed: boolean;
 };
 
 const SESSION_RE = /"sessionID":"(ses_[A-Za-z0-9]+)"/;
@@ -145,9 +176,18 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
   await writeFile(transcriptPath, "", "utf8");
   await writeFile(stderrPath, "", "utf8");
   const args = composeRunArgs(spec);
+  // Sandbox preflight is existence-only: no bwrap or no mask list → direct
+  // spawn, disclosed on the outcome (and thence the voice face). A venue that
+  // claims isolation it does not have is worse than one that admits none.
+  const bwrap = cfg.bwrapBin ?? "/usr/bin/bwrap";
+  const mask = cfg.sandboxMaskDirs ?? [];
+  const sandboxed = mask.length > 0 && existsSync(bwrap);
+  const spawnArgv = sandboxed
+    ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs: [cfg.runDir], bin: cfg.opencodeBin, args })
+    : [cfg.opencodeBin, ...args];
 
   return new Promise<LaunchOutcome>((resolvePromise) => {
-    const child = spawn(cfg.opencodeBin, args, {
+    const child = spawn(spawnArgv[0] as string, spawnArgv.slice(1), {
       cwd: paths.workspace,
       env,
       detached: true,
@@ -172,6 +212,7 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
           sessionId: extractSessionId(transcript),
           startedAt,
           endedAt: new Date().toISOString(),
+          sandboxed,
         };
         if (spawnError !== undefined) result.error = spawnError;
         resolvePromise(result);
