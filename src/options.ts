@@ -93,6 +93,9 @@ export const pluginOptionsSchema = z
       opencodeBin: z.string().min(1).prefault(discoverOpencodeBin),
       configSource: z.string().prefault(() => join(homedir(), ".config", "opencode", "opencode.jsonc")),
       roleTimeoutMs: z.number().int().min(5_000).default(600_000),
+      /** Exam venue: absolute dirs tmpfs-masked from the candidate (grader files,
+       * other runs). Empty = venue runs unsandboxed and SAYS SO on the voice face. */
+      examMaskDirs: z.array(z.string().min(2)).default([]),
     })
     .prefault({}),
   /** v1.1 E4/F1: seats only from allowed model-id prefixes; deny at launch. */
