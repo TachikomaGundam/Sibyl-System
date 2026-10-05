@@ -95,11 +95,13 @@ test("examVoice: single conclusion line, canary veto visible, spotcheck appended
     ],
     "sibyl-1",
     "/tmp/sibyl-run-sibyl-1",
+    "ON (masked 2 dir(s))",
   );
   assert.equal(out.match(/conclusion: /g)?.length, 1);
   assert.match(out, /REJECT/);
   assert.match(out, /CANARY-VETO/);
   assert.match(out, /sha256sum -c CHECKSUMS.txt/);
+  assert.match(out, /venue sandbox: ON \(masked 2 dir\(s\)\)/);
 });
 
 test("nodeBinary + cliCommand resolve dev-layout entry", () => {
