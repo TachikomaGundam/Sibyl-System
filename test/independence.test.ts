@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import type { EngineClient } from "../src/engine/index.ts";
-import { assessIndependence, independenceLabel, MAX_CHAIN_DEPTH } from "../src/independence.ts";
+import { assessIndependence, independenceLabel, LINEAGE_CHUNK, MAX_CHAIN_DEPTH } from "../src/independence.ts";
 import type { ArtifactInput } from "../src/tools/shared.ts";
 
 type MsgRow = NonNullable<NonNullable<Awaited<ReturnType<NonNullable<EngineClient["session"]["messages"]>>>["data"]>[number]>;
@@ -187,4 +187,78 @@ test("chamber record validation carries the independence leg and refuses bad sha
   assert.deepEqual(v.ok ? v.record.independence : undefined, good.independence);
   assert.ok(!validateChamberRecord({ ...base, independence: { status: "GUILTY", convenerChain: [], evidence: "" } }).ok);
   assert.ok(!validateChamberRecord({ ...base, independence: { status: "INDEPENDENT", convenerChain: [""], evidence: "x" } }).ok);
+});
+
+// ---------------------------------------------------------------- v2 lineage
+
+function timedPart(tool: string, input: Record<string, unknown>, created: number): MsgRow {
+  return { info: { role: "assistant", time: { created } }, parts: [{ type: "tool", tool, input }] } as unknown as MsgRow;
+}
+
+function doc(seed: string, chunks: number): string {
+  return Array.from({ length: chunks }, (_, i) => `${seed}${String(i)}:`.padEnd(LINEAGE_CHUNK, `${i}`)).join("");
+}
+
+const MTIME = 1_000_000;
+const LONG_DOC = doc("lineage-body-", 10);
+const LONG_ARTIFACT: ArtifactInput = {
+  ok: true, kind: "path", source: "/work/long.md", text: LONG_DOC, mtimeMs: MTIME,
+};
+// need = ceil(32 samples? -> windows: floor(2560/256)=10, step 1, samples 10) * 0.6 = 6
+test("v2: verbatim full text written under a DIFFERENT path before mtime => NOT-INDEPENDENT (526d case)", async () => {
+  const m = mock(new Map([["ses_c", {
+    messages: [timedPart("write", { filePath: "/tmp/clone/long.md", content: LONG_DOC }, MTIME - 10)],
+  }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "NOT-INDEPENDENT");
+  assert.match(v.evidence, /content-lineage|full-text containment/);
+});
+
+test("v2: bash heredoc carrying the artifact verbatim before mtime => NOT-INDEPENDENT (F-W1a)", async () => {
+  const cmd = `cat <<'EOF' > /work/long.md\n${LONG_DOC}\nEOF`;
+  const m = mock(new Map([["ses_c", { messages: [timedPart("bash", { command: cmd }, MTIME - 1)] }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "NOT-INDEPENDENT");
+});
+
+test("v2: partial copy-from-file AFTER mtime never convicts (false-conviction gate)", async () => {
+  const m = mock(new Map([["ses_c", {
+    messages: [timedPart("write", { filePath: "/work/notes.md", content: LONG_DOC }, MTIME + 10)],
+  }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "INDEPENDENT");
+  assert.match(v.evidence, /post-mtime copies/);
+});
+
+test("v2: template boilerplate (2 of 10 windows) is a minority => INDEPENDENT with confessed count", async () => {
+  const template = `${LONG_DOC.slice(0, LINEAGE_CHUNK)}TAIL${LONG_DOC.slice(LINEAGE_CHUNK, 2 * LINEAGE_CHUNK)}TAIL`;
+  const m = mock(new Map([["ses_c", {
+    messages: [timedPart("write", { filePath: "/work/fresh.md", content: template }, MTIME - 5)],
+  }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "INDEPENDENT");
+  assert.match(v.evidence, /2\/10 lineage windows matched \(need 6\)/);
+});
+
+test("v2: union across several parts reaches the majority => NOT-INDEPENDENT", async () => {
+  const parts: MsgRow[] = [0, 1, 2, 3, 4, 5, 6].map((i) =>
+    timedPart("edit", { filePath: `/work/slice-${String(i)}.tmp`, newString: LONG_DOC.slice(i * LINEAGE_CHUNK, (i + 1) * LINEAGE_CHUNK) }, MTIME - 100 + i));
+  const m = mock(new Map([["ses_c", { messages: parts }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "NOT-INDEPENDENT");
+});
+
+test("v2: timeless parts are never credited (precedence unprovable) and are confessed", async () => {
+  const m = mock(new Map([["ses_c", { messages: [writePart("write", { filePath: "/work/x.md", content: LONG_DOC })] }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
+  assert.equal(v.status, "INDEPENDENT");
+  assert.match(v.evidence, /lacked timestamps/);
+});
+
+test("v2: artifact shorter than 3 windows keeps the lineage leg silent", async () => {
+  const tiny: ArtifactInput = { ok: true, kind: "path", source: "/work/t.md", text: "x".repeat(400), mtimeMs: MTIME };
+  const m = mock(new Map([["ses_c", { messages: [timedPart("bash", { command: `x`.repeat(400) }, MTIME - 1)] }]]));
+  const v = await assessIndependence(m.client, "/work", "ses_c", tiny);
+  assert.equal(v.status, "INDEPENDENT");
+  assert.doesNotMatch(v.evidence, /lineage/);
 });

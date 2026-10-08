@@ -191,7 +191,7 @@ test("toEngineClient.messages: strips union noise, keeps salvage fields, user ar
   const assistant = msgs[1]!;
   assert.deepEqual(user.info, { role: "user" }); // user arm: role only
   assert.deepEqual(user.parts, [{ type: "text", text: "q" }]);
-  assert.deepEqual(assistant.info, { role: "assistant", providerID: "p", modelID: "m", time: { completed: 3 } }); // error:undefined stripped, time.created stripped
+  assert.deepEqual(assistant.info, { role: "assistant", providerID: "p", modelID: "m", time: { completed: 3, created: 2 } }); // error:undefined stripped; time.created KEPT (W1-v2 lineage time gate)
   assert.deepEqual(assistant.parts, [{ type: "text", text: "ballot" }]); // part id/sessionID stripped
   assert.deepEqual(calls.messages[0], { path: { id: "sdk-1" }, query: { directory: "/d" } });
 

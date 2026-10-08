@@ -16,6 +16,15 @@
 //      a write/edit tool part targeting the artifact path, or content matching
 //      the inline artifact (>= MIN_INLINE_MATCH chars, exact-after-trim or
 //      containment, plus the assistant-text leg where the author pasted it);
+//   2b. v2 content lineage (F-W1a/F-W1c, live miss: ballot 526d judged a
+//      receipt INDEPENDENT that its convener chain had authored verbatim under
+//      a different checkout path, plus heredoc drafts): sample verbatim
+//      256-byte windows of a path artifact and match them against write-tool
+//      content AND shell argv within the chain, gated to parts that predate
+//      the artifact's mtime — a part after mtime only ever copied FROM the
+//      file, and copying is not drafting. Conviction needs a majority of the
+//      sampled windows (template boilerplate matches a few windows, never a
+//      majority; the ratio is exported for the tests to lock).
 //   3. a hit on any chain member => NOT-INDEPENDENT. No hit within the read
 //      scope => INDEPENDENT. A chain/content read that CANNOT be made =>
 //      UNVERIFIABLE (never silently INDEPENDENT — absence-of-evidence is not
@@ -81,7 +90,83 @@ function contentMatches(input: Record<string, unknown> | undefined, needle: stri
   return false;
 }
 
-function scanMessages(rows: Msg[], convenerIndex: number, sid: string, artifact: ArtifactInput & { ok: true }): string | null {
+/** Shell tools: argv carries heredoc/inline drafts verbatim (F-W1a family). */
+const SHELL_TOOLS = ["bash"] as const;
+const SHELL_KEYS = ["command"] as const;
+
+/** Verbatim window a lineage claim demands, and how many the artifact yields. */
+export const LINEAGE_CHUNK = 256;
+export const LINEAGE_SAMPLES = 32;
+/** Fraction of sampled windows that must be found to convict (tests lock it). */
+export const LINEAGE_UNION_RATIO = 0.6;
+/** Below this many windows no fair majority exists — leg stays silent. */
+export const LINEAGE_MIN_WINDOWS = 3;
+
+type Lineage = {
+  chunks: string[];
+  need: number;
+  mtimeMs: number;
+  matched: Map<number, string>;
+  copiedAfterMtime: number;
+  timeless: number;
+};
+
+function sampleWindows(text: string): string[] {
+  const total = Math.floor(text.length / LINEAGE_CHUNK);
+  if (total < LINEAGE_MIN_WINDOWS) return [];
+  const step = Math.max(1, Math.floor(total / LINEAGE_SAMPLES));
+  const out: string[] = [];
+  for (let i = 0; i < total; i += step) out.push(text.slice(i * LINEAGE_CHUNK, (i + 1) * LINEAGE_CHUNK));
+  return out.slice(0, LINEAGE_SAMPLES);
+}
+
+function beginLineage(artifact: ArtifactInput & { ok: true }): Lineage | null {
+  if (artifact.kind !== "path" || artifact.mtimeMs === undefined) return null;
+  const chunks = sampleWindows(artifact.text);
+  if (chunks.length < LINEAGE_MIN_WINDOWS) return null;
+  return {
+    chunks,
+    need: Math.max(2, Math.ceil(chunks.length * LINEAGE_UNION_RATIO)),
+    mtimeMs: artifact.mtimeMs,
+    matched: new Map(),
+    copiedAfterMtime: 0,
+    timeless: 0,
+  };
+}
+
+function messageTime(m: Msg): number | undefined {
+  const t = (m.info as { time?: { created?: number } } | undefined)?.time?.created;
+  return typeof t === "number" ? t : undefined;
+}
+
+function partCandidates(p: { tool?: string; input?: Record<string, unknown> }): string[] {
+  const shell = p.tool !== undefined && (SHELL_TOOLS as readonly string[]).includes(p.tool);
+  if (!shell && !isDraftingTool(p.tool)) return [];
+  const keys: readonly string[] = shell ? SHELL_KEYS : CONTENT_KEYS;
+  const out: string[] = [];
+  for (const key of keys) {
+    const v = p.input?.[key];
+    if (typeof v === "string" && v.length >= LINEAGE_CHUNK) out.push(v);
+  }
+  return out;
+}
+
+function lineageVerdict(lg: Lineage, artifact: ArtifactInput & { ok: true }): string {
+  const sources = [...new Set([...lg.matched.values()])].slice(0, 3).join("; ");
+  return (
+    `content-lineage evidence: ${String(lg.matched.size)} of ${String(lg.chunks.length)} verbatim ` +
+    `${String(LINEAGE_CHUNK)}-byte windows of ${artifact.source} appear in convener-chain tool inputs ` +
+    `that predate its mtime (${sources}) — the chain authored this artifact's bytes before/independently ` +
+    `of this path`
+  );
+}
+function scanMessages(
+  rows: Msg[],
+  convenerIndex: number,
+  sid: string,
+  artifact: ArtifactInput & { ok: true },
+  lg: Lineage | null,
+): string | null {
   for (const [mi, m] of rows.entries()) {
     for (const p of m.parts ?? []) {
       if (p.type === "tool" && isDraftingTool(p.tool)) {
@@ -102,6 +187,26 @@ function scanMessages(rows: Msg[], convenerIndex: number, sid: string, artifact:
         p.text.includes(artifact.text.trim())
       ) {
         return `drafting evidence: assistant text in convener-chain session ${sid} (chain position ${String(convenerIndex)}, message ${String(mi)}) contains the inline artifact`;
+      }
+      if (p.type === "tool" && lg !== null) {
+        const t = messageTime(m);
+        if (t === undefined) {
+          lg.timeless += 1;
+          continue; // no timestamp => precedence unprovable => never credited
+        }
+        if (t > lg.mtimeMs) {
+          lg.copiedAfterMtime += 1;
+          continue; // after the artifact's last edit a part only ever copies FROM it
+        }
+        const label = `${p.tool ?? "tool"}@${sid}:${String(mi)}`;
+        for (const cand of partCandidates(p)) {
+          if (artifact.kind === "path" && cand.includes(artifact.text.trim())) {
+            return `${lineageVerdict({ ...lg, matched: new Map([[0, label]]) }, artifact)}; full-text containment in ${label}`;
+          }
+          for (const [wi, chunk] of lg.chunks.entries()) {
+            if (!lg.matched.has(wi) && cand.includes(chunk)) lg.matched.set(wi, label);
+          }
+        }
       }
     }
   }
@@ -160,6 +265,7 @@ export async function assessIndependence(
   }
 
   // 2. drafting scan across every resolved chain member
+  const lg = beginLineage(artifact);
   let scanFailed = "";
   for (const [i, sid] of chain.entries()) {
     const res = await client.session.messages({ path: { id: sid }, query: { directory } });
@@ -167,21 +273,34 @@ export async function assessIndependence(
       scanFailed = scanFailed.length > 0 ? scanFailed : `messages(${sid}) refused`;
       continue;
     }
-    const hit = scanMessages(res.data, i, sid, artifact);
+    const hit = scanMessages(res.data, i, sid, artifact, lg);
     if (hit !== null) {
       return { status: "NOT-INDEPENDENT", convenerChain: chain, evidence: hit };
     }
+  }
+  if (lg !== null && lg.matched.size >= lg.need) {
+    return { status: "NOT-INDEPENDENT", convenerChain: chain, evidence: lineageVerdict(lg, artifact) };
   }
   if (scanFailed.length > 0 || walkIncomplete) {
     const why = [walkIncomplete ? walkReason : "", scanFailed].filter((s) => s.length > 0).join("; ");
     return { status: "UNVERIFIABLE", convenerChain: chain, evidence: `partial read: ${why} — independence was NOT established` };
   }
   const note = walkReason.length > 0 ? `; walk note: ${walkReason}` : "";
+  const lineageNote = lineageFaceNote(lg);
   return {
     status: "INDEPENDENT",
     convenerChain: chain,
-    evidence: `scanned ${String(chain.length)} session(s) of the convener chain to root; no drafting evidence within read scope${note}`,
+    evidence: `scanned ${String(chain.length)} session(s) of the convener chain to root; no drafting evidence within read scope${lineageNote}${note}`,
   };
+}
+
+/** What the clean verdict must confess about the lineage leg it ran. */
+function lineageFaceNote(lg: Lineage | null): string {
+  if (lg === null) return "";
+  const parts = [`${String(lg.matched.size)}/${String(lg.chunks.length)} lineage windows matched (need ${String(lg.need)})`];
+  if (lg.copiedAfterMtime > 0) parts.push(`${String(lg.copiedAfterMtime)} part(s) excluded as post-mtime copies`);
+  if (lg.timeless > 0) parts.push(`${String(lg.timeless)} part(s) lacked timestamps`);
+  return `; content-lineage: ${parts.join(", ")}`;
 }
 
 /** Receipt-face rendering used by all three entries. */
