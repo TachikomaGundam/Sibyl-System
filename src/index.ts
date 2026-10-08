@@ -106,7 +106,11 @@ export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
                   ...(m.info.providerID !== undefined && { providerID: m.info.providerID }),
                   ...(m.info.modelID !== undefined && { modelID: m.info.modelID }),
                   ...(m.info.time !== undefined && {
-                    time: { ...(m.info.time.completed !== undefined && { completed: m.info.time.completed }) },
+                    time: {
+                      ...(m.info.time.completed !== undefined && { completed: m.info.time.completed }),
+                      // W1-v2 lineage time gate needs creation stamps too
+                      ...("created" in m.info.time && m.info.time.created !== undefined && { created: m.info.time.created as number }),
+                    },
                   }),
                   ...(m.info.error !== undefined && { error: m.info.error }),
                 }),

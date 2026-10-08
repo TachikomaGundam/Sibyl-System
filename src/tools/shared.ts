@@ -70,7 +70,9 @@ export function slotForModel(
 }
 
 export type ArtifactInput =
-  | { ok: true; kind: "path"; source: string; text: string }
+  /** mtimeMs feeds the W1 content-lineage time gate (a chain part can only
+   * prove DRAFTING when it predates the artifact's last modification). */
+  | { ok: true; kind: "path"; source: string; text: string; mtimeMs?: number }
   | { ok: true; kind: "inline"; source: string; text: string }
   | { ok: false; error: string };
 
@@ -119,7 +121,7 @@ export async function readArtifact(raw: string, cwd: string): Promise<ArtifactIn
   } catch (err) {
     return { ok: false, error: `artifact "${path}": ${errMessage(err)}` };
   }
-  return { ok: true, kind: "path", source: path, text };
+  return { ok: true, kind: "path", source: path, text, mtimeMs: info.mtimeMs };
 }
 
 /** Render an unknown error value as a stable string (engine describeError parity:

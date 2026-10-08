@@ -118,7 +118,7 @@ export type EngineClient = {
           role?: string;
           providerID?: string;
           modelID?: string;
-          time?: { completed?: number };
+          time?: { completed?: number; created?: number };
           error?: unknown;
         };
         /** W1: tool parts additionally carry the tool name and its input bag
