@@ -75,6 +75,7 @@ try {
   const expected = [
     "sibyl_anchor_check",
     "sibyl_attribute",
+    "sibyl_audit",
     "sibyl_consult",
     "sibyl_review",
     "sibyl_status",
