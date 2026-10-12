@@ -459,3 +459,68 @@ test("parentID guard: omitted or empty parentID leaves NO parentID key (top-leve
   assert.equal("parentID" in calls.create[0]!.body, false);
   assert.equal("parentID" in calls.create[1]!.body, false);
 });
+
+// ---- owner ruling 2026-10-12 item 3: exactly one transport retry per seat ----
+
+test("transport death + empty salvage => ONE re-issue; success carries retried:true", { timeout: 5_000 }, async () => {
+  let attempts = 0;
+  const { client, calls } = scriptedClient({
+    prompt: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("fetch failed");
+      return { data: { info: { providerID: "acme", modelID: "m1" }, parts: [{ type: "text", text: "RETRY-BALLOT" }] } };
+    },
+    messages: () => ({ data: [{ info: { role: "assistant", time: {} }, parts: [] }] }),
+  });
+  const result = await runPersona({ ...baseOpts(client), timeoutMs: 150, salvageMs: 120, salvagePollMs: 20 });
+  assert.equal(result.ok, true);
+  assert.equal(result.retried, true);
+  assert.equal(result.text, "RETRY-BALLOT");
+  assert.equal(calls.create.length, 2);
+  assert.equal(attempts, 2);
+  assert.match(calls.create[1]?.body.title ?? "", / r2$/);
+});
+
+test("transport death on BOTH attempts => fails once, error names the spent retry, never a third try", { timeout: 5_000 }, async () => {
+  let attempts = 0;
+  const { client, calls } = scriptedClient({
+    prompt: async () => {
+      attempts += 1;
+      throw new Error("fetch failed");
+    },
+    messages: () => ({ data: [] }),
+  });
+  const result = await runPersona({ ...baseOpts(client), timeoutMs: 150, salvageMs: 120, salvagePollMs: 20 });
+  assert.equal(result.ok, false);
+  assert.equal(result.retried, true);
+  assert.equal(attempts, 2);
+  assert.equal(calls.create.length, 2);
+  assert.match(result.error ?? "", /one transport retry spent/);
+});
+
+test("model-side info.error is substantive: ZERO retries (transport-only law)", { timeout: 5_000 }, async () => {
+  const { client, calls } = scriptedClient({
+    prompt: () => ({ data: { info: { error: { name: "ProviderError", message: "model refused" } }, parts: [] } }),
+  });
+  const result = await runPersona({ ...baseOpts(client), ...SALVAGE_OPTS });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /model refused/);
+  assert.equal(result.retried, undefined);
+  assert.equal(calls.create.length, 1);
+});
+
+test("salvage success path never triggers the retry (one ballot, one session)", { timeout: 5_000 }, async () => {
+  const { client, calls } = scriptedClient({
+    prompt: async () => {
+      throw new Error("fetch failed");
+    },
+    messages: () => ({
+      data: [{ info: { role: "assistant", providerID: "acme", modelID: "m1", time: { completed: 9 } }, parts: [{ type: "text", text: "SALVAGED-NO-RETRY" }] }],
+    }),
+  });
+  const result = await runPersona({ ...baseOpts(client), ...SALVAGE_OPTS });
+  assert.equal(result.ok, true);
+  assert.equal(result.salvaged, true);
+  assert.equal(result.retried, undefined);
+  assert.equal(calls.create.length, 1);
+});

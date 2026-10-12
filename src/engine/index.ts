@@ -44,6 +44,11 @@ export type PersonaRunResult = {
   salvaged?: boolean;
   /** Present only when salvaged — ms the engine ran past the client budget. */
   salvageExtraMs?: number;
+  /** Internal to the retry wrapper: the failure was transport-class, so one
+   * clean re-issue is lawful (no ballot ever formed; owner ruling 2026-10-12). */
+  retryable?: boolean;
+  /** True on a result produced by the one transport retry. */
+  retried?: boolean;
 };
 
 /**
@@ -256,7 +261,7 @@ async function salvageAfterPromptTimeout(
 }
 
 /** Drive one child session; never throws, always returns a structured result. */
-export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunResult> {
+async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Promise<PersonaRunResult> {
   const { client, directory, persona, model, inputText, parentID } = opts;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const t0 = Date.now();
@@ -280,7 +285,7 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
     const created = await withTimeout(
       client.session.create({
         body: {
-          title: `sibyl:${persona.agent ?? "persona"}`,
+          title: `sibyl:${persona.agent ?? "persona"}${attempt === 1 ? "" : ` r${String(attempt)}`}`,
           ...(parentID !== undefined && parentID.length > 0 && { parentID }),
         },
         query: { directory },
@@ -327,9 +332,9 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
         graceMs,
         opts.salvagePollMs ?? DEFAULT_SALVAGE_POLL_MS,
       );
-      if (!outcome) return fail(promptFailure);
+      if (!outcome) return { ...fail(promptFailure), retryable: true };
       if (outcome.kind === "error") {
-        return fail(`${promptFailure}; salvage read failed: ${outcome.error}`);
+        return { ...fail(`${promptFailure}; salvage read failed: ${outcome.error}`), retryable: true };
       }
       return {
         text: outcome.text,
@@ -341,7 +346,10 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
         salvageExtraMs: Date.now() - raceExpiredAt,
       };
     }
-    if (prompted.error) return fail(describeError(prompted.error));
+    if (prompted.error) {
+      const channel = describeError(prompted.error);
+      return SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(channel) ? { ...fail(channel), retryable: true } : fail(channel);
+    }
     if (!prompted.data) return fail("session.prompt: response missing data payload");
     const info = prompted.data.info;
     // Child LLM failure surfaces as info.error — check both failure channels.
@@ -370,6 +378,24 @@ export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunRes
   } catch (e) {
     // Any unexpected throw (timeout rejection, broken client) is captured here:
     // timeouts carry their stage ("create" | "prompt") via the stage tracker.
-    return fail(e instanceof Error ? e.message : describeError(e));
+    const thrown = e instanceof Error ? e.message : describeError(e);
+    return SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(thrown) ? { ...fail(thrown), retryable: true } : fail(thrown);
   }
+}
+
+/**
+ * runPersona with the sanctioned transport retry (owner ruling 2026-10-12,
+ * item 3 of "1,3"): a transport-class seat death with no salvageable ballot
+ * gets EXACTLY ONE re-issue in a clean session. This is infra repair, not a
+ * re-roll — no ballot ever formed to roll; the failed session rows stay in
+ * the engine store as evidence (failure paths never delete). Model-side
+ * errors (info.error), parse failures and substantive outcomes never retry.
+ */
+export async function runPersona(opts: RunPersonaOptions): Promise<PersonaRunResult> {
+  const first = await runPersonaAttempt(opts, 1);
+  if (first.ok || first.retryable !== true) return first;
+  const second = await runPersonaAttempt(opts, 2);
+  if (second.ok) return { ...second, retried: true };
+  const { retryable: _dropped, ...settled } = second;
+  return { ...settled, retried: true, error: `${second.error} (one transport retry spent; first death: ${first.error})` };
 }
