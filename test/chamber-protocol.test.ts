@@ -302,3 +302,28 @@ test("parseJudgeRound grammar: strict acceptance and refusal table", () => {
   );
   assert.equal(parseJudgeRound("prose only"), null);
 });
+
+test("voice independence leg: an UNVERIFIABLE launch names itself in the ONE VOICE render", async (t) => {
+  const { dir, cfgBase } = await fixture("v-ind-unver");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lane = stubLane(writer(dir, DEFAULT_CONTENT));
+  const res = await runChamber({
+    ...cfgBase,
+    lane,
+    independence: { status: "UNVERIFIABLE", convenerChain: [], evidence: "bare CLI launch: test-probe" },
+  });
+  const voice = buildVoice(res);
+  assert.equal(voice.independence, "UNVERIFIABLE — bare CLI launch: test-probe");
+  const rendered = renderVoice(voice);
+  assert.match(rendered, /^independence: UNVERIFIABLE — bare CLI launch: test-probe$/m);
+  assert.ok(singleVoiceCheck(rendered, res.record).ok, "one-voice verify still true with the added face line");
+});
+
+test("voice independence leg: a record without the leg (pre-W1 shape) self-marks MISSING, never silent", async (t) => {
+  const { dir, cfgBase } = await fixture("v-ind-missing");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lane = stubLane(writer(dir, DEFAULT_CONTENT));
+  const res = await runChamber({ ...cfgBase, lane });
+  assert.equal(res.record.independence, undefined);
+  assert.match(buildVoice(res).independence, /^MISSING-PRE-W1/);
+});

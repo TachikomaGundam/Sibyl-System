@@ -22,6 +22,7 @@ export type SibylVoice = {
   open_charges: number;
   dissent_sealed_in: string[];
   terminal: TerminalState;
+  independence: string;
   run_id: string;
   serial: number;
   spotcheck: string;
@@ -47,6 +48,14 @@ export function conclude(result: ChamberResult): { conclusion: Conclusion; confi
   return { conclusion: "NEEDS_HUMAN", confidence: 0 };
 }
 
+/** The chamber's voice face must carry the W1 verdict line too — a record whose
+ * independence leg is missing (pre-W1 rows) or unfavourable names itself loudly. */
+function voiceIndependence(record: ChamberResult["record"]): string {
+  const ind = record.independence;
+  if (ind === undefined) return "MISSING-PRE-W1 — this record predates convener capture; never treat as independent";
+  return ind.status === "INDEPENDENT" ? "INDEPENDENT" : `${ind.status} — ${ind.evidence}`;
+}
+
 export function buildVoice(result: ChamberResult): SibylVoice {
   const { record, judge, terminal, gaps } = result;
   const { conclusion, confidence } = conclude(result);
@@ -67,6 +76,7 @@ export function buildVoice(result: ChamberResult): SibylVoice {
     open_charges: judge?.charges.length ?? 0,
     dissent_sealed_in: sealed,
     terminal,
+    independence: voiceIndependence(record),
     run_id: record.runId,
     serial: record.serial,
     spotcheck: spotcheckCommand(record.runDir),
@@ -78,6 +88,7 @@ export function renderVoice(voice: SibylVoice): string {
   const lines = [
     `SIBYL — ONE CONCLUSION, ONE VOICE  [${voice.label}]`,
     `conclusion: ${voice.conclusion}  confidence: ${String(voice.confidence)}  terminal: ${voice.terminal}`,
+    `independence: ${voice.independence}`, 
     `run: ${voice.run_id} (serial ${String(voice.serial)})  open charges: ${String(voice.open_charges)}`,
     `honesty: ${voice.honesty} (until C-09/C-14 containment rulings — see docs/isolation-laws.md)`,
     "rationale:",
