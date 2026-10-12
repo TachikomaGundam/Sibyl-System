@@ -29,9 +29,18 @@ import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
 export const CONSULT_TOOL_NAME = "sibyl_consult";
 
+/** Hard output budget for every councilor ballot (owner ruling 2026-10-12 "B"):
+ * long ballot legs died in the shared transport window eight rounds straight —
+ * the cap, generalized from the 401e precedent, protects all three seats equally. */
+export const BALLOT_BUDGET_LINES = 25;
+
 /** Prompt each councilor sees: the pinned goal plus the artifact under audit. */
 export function buildConsultInput(goal: string, artifactText: string): string {
-  return `Audit the artifact below against the stated goal and cast your verdict.\n\nGOAL:\n${goal}\n\nARTIFACT:\n${artifactText}`;
+  return (
+    `Audit the artifact below against the stated goal and cast your verdict.\n\nGOAL:\n${goal}\n\nARTIFACT:\n${artifactText}\n\n` +
+    `BALLOT BUDGET (hard): total output at most ${String(BALLOT_BUDGET_LINES)} lines; one line per reason and per must-fix; ` +
+    "no headings, no blank lines, no code blocks. The cap binds every seat alike — it is a transport protection, not a depth limit."
+  );
 }
 
 /** The demand sent back into a voter's own session when its first reply did
