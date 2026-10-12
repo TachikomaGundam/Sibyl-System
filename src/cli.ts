@@ -145,13 +145,25 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
   const runDir = join(laneCfg.runRoot, `sibyl-run-${runId}`);
   await mkdir(runDir, { recursive: true });
 
-  let launchIndependence: IndependenceRef | undefined;
+  let launchIndependence: IndependenceRef;
   try {
     const lc = JSON.parse(await readFile(join(runDir, "launch-context.json"), "utf8")) as Record<string, unknown>;
-    if (isIndependenceShape(lc["independence"])) launchIndependence = lc["independence"];
+    launchIndependence = isIndependenceShape(lc["independence"])
+      ? lc["independence"]
+      : {
+          status: "UNVERIFIABLE",
+          convenerChain: [],
+          evidence: "launch-context staged but its independence leg is malformed — not trusted; this review carries no independence anchor",
+        };
   } catch {
-    // no staged context (direct CLI launch): the runner records what it can —
-    // the W1 face for a headless launch is the tool-side receipt, not this file
+    // bare CLI launch: no wrapper resolved a convener. Absence of the field was
+    // the old silent hole; the field must be present and NAMED (W1 header rule:
+    // missing-field-is-violation, digest §three.2).
+    launchIndependence = {
+      status: "UNVERIFIABLE",
+      convenerChain: [],
+      evidence: "bare CLI launch: no convener session staged; the drafting-chain read was impossible by construction",
+    };
   }
 
   let targetPath = targetRaw;
