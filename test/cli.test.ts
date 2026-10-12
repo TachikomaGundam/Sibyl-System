@@ -176,7 +176,7 @@ test("W1 launch-context.json: staged independence finding rides the chamber reco
   assert.deepEqual(r.ok ? r.run.chamber?.independence : undefined, verdict);
 });
 
-test("W1 launch-context fail-soft: malformed staged shape yields no independence leg (never a crash, never a fake)", async (t) => {
+test("W1 launch-context (amended 2026-10: absence-must-be-named): malformed staged shape => UNVERIFIABLE leg, never a crash, never a fake", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-bad-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const runId = "sibyl-TEST-badctx-0002";
@@ -187,5 +187,64 @@ test("W1 launch-context fail-soft: malformed staged shape yields no independence
   await writeFile(join(runDir, "launch-context.json"), JSON.stringify({ independence: { status: "GUILT-BY-ASSOCIATION" } }), "utf8");
   const r = await resolveRun({ target, goal: "g", "run-id": runId, "run-root": dir });
   assert.ok(r.ok, r.ok ? "" : r.error);
-  assert.equal(r.ok ? r.run.chamber?.independence : "set", undefined);
+  const ind = r.ok ? r.run.chamber?.independence : undefined;
+  assert.equal(ind?.status, "UNVERIFIABLE");
+  assert.match(ind?.evidence ?? "", /malformed/);
+});
+
+// ---- W1 chamber launch-context: absence is a named UNVERIFIABLE, never a silent hole
+
+async function chamberBase(): Promise<{ dir: string; configPath: string; target: string }> {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-indep-"));
+  const target = join(dir, "artifact.md");
+  await writeFile(target, "# doc\nclaims\n", "utf8");
+  const opts = parseOptions({
+    lane: { runRoot: dir, opencodeBin: "/usr/bin/true", configSource: "", roleTimeoutMs: 30_000 },
+    modelPolicy: { allowedPrefixes: ["local-"] },
+    chamber: { maxRounds: 2, roles: { evidence: "s1", pro: "s1", con: "s1", judge: "s1" }, judgePool: ["s1"] },
+    modelPool: { default: { providerID: "local-x", modelID: "m" }, s1: { providerID: "local-x", modelID: "m" } },
+  });
+  assert.ok(opts.ok);
+  const configPath = join(dir, "opts.json");
+  await writeFile(configPath, JSON.stringify(opts.ok ? opts.options : {}), "utf8");
+  return { dir, configPath, target };
+}
+
+test("resolveRun: bare CLI launch (no launch-context) => chamber carries UNVERIFIABLE named, field present", async (t) => {
+  const { dir, configPath, target } = await chamberBase();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const r = await resolveRun({ target, goal: "g", config: configPath });
+  assert.ok(r.ok, JSON.stringify(r));
+  if (!r.ok) return;
+  assert.equal(r.run.chamber?.independence?.status, "UNVERIFIABLE");
+  assert.match(r.run.chamber?.independence?.evidence ?? "", /bare CLI launch/);
+});
+
+test("resolveRun: malformed staged launch-context => UNVERIFIABLE 'malformed', not trusted, not silent", async (t) => {
+  const { dir, configPath, target } = await chamberBase();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const first = await resolveRun({ target, goal: "g", config: configPath });
+  assert.ok(first.ok);
+  if (!first.ok) return;
+  await writeFile(join(first.run.runDir, "launch-context.json"), JSON.stringify({ convenerSessionID: "x", independence: { status: "BOGUS" } }), "utf8");
+  const r = await resolveRun({ target, goal: "g", config: configPath, "run-id": first.run.runId });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.run.chamber?.independence?.status, "UNVERIFIABLE");
+  assert.match(r.run.chamber?.independence?.evidence ?? "", /malformed/);
+});
+
+test("resolveRun: valid staged launch-context passes through verbatim (tool-wrapper lane)", async (t) => {
+  const { dir, configPath, target } = await chamberBase();
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const first = await resolveRun({ target, goal: "g", config: configPath });
+  assert.ok(first.ok);
+  if (!first.ok) return;
+  const staged = { convenerSessionID: "ses_fresh", independence: { status: "INDEPENDENT", convenerChain: ["ses_fresh"], evidence: "scanned 1 session(s)" } };
+  await writeFile(join(first.run.runDir, "launch-context.json"), JSON.stringify(staged), "utf8");
+  const r = await resolveRun({ target, goal: "g", config: configPath, "run-id": first.run.runId });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.run.chamber?.independence?.status, "INDEPENDENT");
+  assert.deepEqual(r.run.chamber?.independence?.convenerChain, ["ses_fresh"]);
 });
