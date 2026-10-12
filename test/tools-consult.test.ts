@@ -360,3 +360,12 @@ test("W1 self-convoked poll: drafter's chain convened the review => NOT-INDEPEND
   assert.equal(runs[0]?.verdict?.verdict, "REJECT", "ballot preserved as data");
   assert.ok(runs[0]?.notes?.includes("not in any effective path"), runs[0]?.notes);
 });
+
+test("ballot budget cap (owner ruling B 2026-10-12): every councilor prompt carries the 25-line hard budget", async () => {
+  const { buildConsultInput, BALLOT_BUDGET_LINES } = await import("../src/tools/consult.ts");
+  const text = buildConsultInput("goal here", "artifact body");
+  assert.ok(BALLOT_BUDGET_LINES === 25, "cap value is the 401e precedent: 25");
+  assert.match(text, /BALLOT BUDGET \(hard\): total output at most 25 lines/);
+  assert.match(text, /transport protection, not a depth limit/);
+  assert.ok(text.indexOf("BALLOT BUDGET") > text.indexOf("ARTIFACT:"), "budget trails the artifact: the goal stays the first thing a seat reads");
+});
