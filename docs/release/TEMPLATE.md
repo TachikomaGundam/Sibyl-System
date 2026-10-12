@@ -12,10 +12,12 @@ gate: <PASS or FAIL — write the REAL gate verdict here; the literal placeholde
   commit -> `git diff --stat <base>..<commit>` -> paste REAL output into this packet ->
   amend -> tag. The tag body must never contain a 'pending' placeholder for a proof the
   seat can already produce. Delta must contain ONLY the expected release files.
-- gate evidence permanence: copy the gate report AND each leg's log into the repo's
-  tracked evidence dir (.omo/evidence/<wheel>/...) in the generating turn, and anchor
-  this packet to those paths + sha256. tmpfs is not a receipt home — an anchor that
-  dies with a reboot is an unfalsifiable receipt (ballot 49d5, confirmed defect).
+- gate evidence permanence: copy the gate report AND each leg's log into the operator's
+  PERSISTENT evidence dir (/home-anchored .omo/evidence/<wheel>/... — the criterion is
+  non-tmpfs durability, NOT git-trackedness; this ledger is deliberately operator-local)
+  in the generating turn, and anchor this packet to those ABSOLUTE paths + sha256.
+  tmpfs is not a receipt home — an anchor that dies with a reboot is an unfalsifiable
+  receipt (ballot 49d5, confirmed defect; wording self-correction by this seat 2026-10).
 - release-boundary manifest: `git log --oneline <previous-tag>..<new-commit>` in full —
   the packet states its whole shipped delta, not only the wheel commit.
 
