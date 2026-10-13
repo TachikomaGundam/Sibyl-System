@@ -28,3 +28,12 @@ gate: <PASS or FAIL — write the REAL gate verdict here; the literal placeholde
 - before the human push, run the outside lane on THIS final packet
   (`opencode run --agent build` calling sibyl_audit); an EFFECTIVE REJECT must be
   fixed before the tag ships. Post-publish self-audit stays as backstop, not gate.
+- tag-anchor rule (owner ruling 2026-10-13, plan A after the d2ad/final5 deadlock):
+  the FINAL audit round's run id + verdict are written into the TAG MESSAGE body at
+  tag creation, not claimed inside the packet. The packet describes every tag-relative
+  act in intent tense ("will be drilled/fetched"), with RCs recorded in the round
+  ledger before the prescription is handed over.
+- named structural exemption: a pre-tag audit round can never legitimately APPROVE
+  tag-relative completion claims (the tag does not yet exist); a REJECT whose findings
+  are ALL of that class is recorded as STRUCTURAL, does not require a further round,
+  and is superseded by the tag-message anchor. Substantive findings still block the tag.
