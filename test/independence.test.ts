@@ -304,3 +304,18 @@ test("fragmented minority (25%) stays independent — the ratio is the law", asy
 function timedWrite(tool: string, input: Record<string, unknown>, time: number): MsgRow {
   return { info: { role: "assistant", time: { created: time } }, parts: [{ type: "tool", tool, input }] };
 }
+
+// ——— regression pin for calibration finding F1 (lineage-calibration-20261014):
+// floor-stride on MID-SIZE artifacts (48..63 windows) collapsed to step 1, so
+// sampling watched only the first 8KB. 12KB artifact; the chain drafted the last
+// ~8.3KB under another path. Old ruler: 16 of 32 matched, need 20 -> INDEPENDENT
+// (the blind spot). New ruler: 16 of 24, need 15 -> NOT-INDEPENDENT.
+// Mutation-verified both ways 2026-10-14.
+test("latter-67% drafting convicts (mid-size head-only sampler regression pin)", async () => {
+  const mid = bigText(12);
+  const part = timedWrite("write", { filePath: "/w/tail.md", content: mid.slice(4000) }, 1000);
+  const m = mock(new Map([["ses_c", { messages: [part] }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: mid, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "NOT-INDEPENDENT");
+  assert.match(v.evidence, /of \d+ verbatim 256-byte windows/);
+});
