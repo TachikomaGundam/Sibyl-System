@@ -262,3 +262,45 @@ test("v2: artifact shorter than 3 windows keeps the lineage leg silent", async (
   assert.equal(v.status, "INDEPENDENT");
   assert.doesNotMatch(v.evidence, /lineage/);
 });
+
+// ——— calibration locks (lineage-calibration-20261014): the law is
+// majority-of-bytes OR full containment; minorities read independent by design.
+
+function bigText(kb: number): string {
+  let t = "";
+  let i = 0;
+  while (t.length < kb * 1024) { t += `chunk-${String(i)}:`.padEnd(260, String(i)) + "\n"; i += 1; }
+  return t;
+}
+const BIG = bigText(12);
+
+test("full containment under another path convicts with the honest sentence", async () => {
+  const m = mock(new Map([["ses_c", { messages: [timedWrite("write", { filePath: "/tmp/clone/x.md", content: BIG }, 1000)] }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: BIG, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "NOT-INDEPENDENT");
+  assert.match(v.evidence, /the FULL text of \/work\/a\.md appears verbatim/);
+  assert.doesNotMatch(v.evidence, /1 of \d+ windows/); // F2 cosmetic: no misleading window count on the instant path
+});
+
+test("fragmented majority drafting (8 parts, 80% coverage) convicts via union", async () => {
+  const parts = Array.from({ length: 8 }, (_, i) =>
+    timedWrite("write", { filePath: `/w/p${String(i)}.md`, content: BIG.slice(i * 1200, (i + 1) * 1200) }, 1000),
+  );
+  const m = mock(new Map([["ses_c", { messages: parts }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: BIG, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "NOT-INDEPENDENT");
+  assert.match(v.evidence, /of 28 verbatim 256-byte windows/); // F1: ceil-stride samples reach 28 windows across a 12KB artifact
+});
+
+test("fragmented minority (25%) stays independent — the ratio is the law", async () => {
+  const parts = Array.from({ length: 4 }, (_, i) =>
+    timedWrite("write", { filePath: `/w/q${String(i)}.md`, content: BIG.slice(i * 768, (i + 1) * 768) }, 1000),
+  );
+  const m = mock(new Map([["ses_c", { messages: parts }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: BIG, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "INDEPENDENT");
+});
+
+function timedWrite(tool: string, input: Record<string, unknown>, time: number): MsgRow {
+  return { info: { role: "assistant", time: { created: time } }, parts: [{ type: "tool", tool, input }] };
+}

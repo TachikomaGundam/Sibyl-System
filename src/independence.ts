@@ -114,10 +114,14 @@ type Lineage = {
 function sampleWindows(text: string): string[] {
   const total = Math.floor(text.length / LINEAGE_CHUNK);
   if (total < LINEAGE_MIN_WINDOWS) return [];
-  const step = Math.max(1, Math.floor(total / LINEAGE_SAMPLES));
+  // ceil-stride: windows spread across the WHOLE artifact — floor/1 dense-scan
+  // watched only the head, letting a tail-drafted artifact read independent
+  // (calibration probe lineage-calibration-20261014, F1).
+  const step = Math.max(1, Math.ceil(total / LINEAGE_SAMPLES));
   const out: string[] = [];
-  for (let i = 0; i < total; i += step) out.push(text.slice(i * LINEAGE_CHUNK, (i + 1) * LINEAGE_CHUNK));
-  return out.slice(0, LINEAGE_SAMPLES);
+  for (let i = 0; i < total && out.length < LINEAGE_SAMPLES; i += step)
+    out.push(text.slice(i * LINEAGE_CHUNK, (i + 1) * LINEAGE_CHUNK));
+  return out;
 }
 
 function beginLineage(artifact: ArtifactInput & { ok: true }): Lineage | null {
@@ -201,7 +205,11 @@ function scanMessages(
         const label = `${p.tool ?? "tool"}@${sid}:${String(mi)}`;
         for (const cand of partCandidates(p)) {
           if (artifact.kind === "path" && cand.includes(artifact.text.trim())) {
-            return `${lineageVerdict({ ...lg, matched: new Map([[0, label]]) }, artifact)}; full-text containment in ${label}`;
+            return (
+              `content-lineage evidence: the FULL text of ${artifact.source} appears verbatim in ${label} ` +
+              `(convener-chain tool input, before the file's mtime) — the chain wrote these bytes elsewhere ` +
+              `and moved them here; the chain cannot sit on both sides of this ballot`
+            );
           }
           for (const [wi, chunk] of lg.chunks.entries()) {
             if (!lg.matched.has(wi) && cand.includes(chunk)) lg.matched.set(wi, label);
