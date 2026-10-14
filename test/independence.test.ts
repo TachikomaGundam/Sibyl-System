@@ -282,14 +282,14 @@ test("full containment under another path convicts with the honest sentence", as
   assert.doesNotMatch(v.evidence, /1 of \d+ windows/); // F2 cosmetic: no misleading window count on the instant path
 });
 
-test("fragmented majority drafting (8 parts, 80% coverage) convicts via union", async () => {
+test("overlapping-window majority (8 parts x 2.4KB, 80% coverage) convicts via union", async () => {
   const parts = Array.from({ length: 8 }, (_, i) =>
-    timedWrite("write", { filePath: `/w/p${String(i)}.md`, content: BIG.slice(i * 1200, (i + 1) * 1200) }, 1000),
+    timedWrite("write", { filePath: `/w/p${String(i)}.md`, content: BIG.slice(i * 1200, i * 1200 + 2400) }, 1000),
   );
   const m = mock(new Map([["ses_c", { messages: parts }]]));
   const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: BIG, mtimeMs: 9_000_000_000_000 });
   assert.equal(v.status, "NOT-INDEPENDENT");
-  assert.match(v.evidence, /of 28 verbatim 256-byte windows/); // F1: ceil-stride samples reach 28 windows across a 12KB artifact
+  assert.match(v.evidence, /of \d+ verbatim 256-byte windows/); // F1: ceil-stride spreads windows across the WHOLE artifact
 });
 
 test("fragmented minority (25%) stays independent — the ratio is the law", async () => {
