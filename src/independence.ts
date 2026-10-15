@@ -97,16 +97,26 @@ const SHELL_KEYS = ["command"] as const;
 /** Verbatim window a lineage claim demands, and how many the artifact yields. */
 export const LINEAGE_CHUNK = 256;
 export const LINEAGE_SAMPLES = 32;
-/** Fraction of sampled windows that must be found to convict (tests lock it). */
+/** Fraction of DISTINCT sampled windows that must be found to convict (tests lock it). */
 export const LINEAGE_UNION_RATIO = 0.6;
 /** Below this many windows no fair majority exists — leg stays silent. */
 export const LINEAGE_MIN_WINDOWS = 3;
+/** Absolute evidence floor (adversary controls the typed ratio, so a pure
+ * ratio is escapable by typing <60% verbatim and generating the rest): at
+ * least this many DISTINCT typed windows AND at least this fraction of the
+ * distinct samples convicts regardless of the majority line. */
+export const LINEAGE_FLOOR_MIN = 8;
+export const LINEAGE_FLOOR_RATIO = 0.3;
 
 type Lineage = {
   chunks: string[];
+  /** distinct sampled window CONTENTS — identical template rows count ONCE
+   * (repetition-inflation defense, ballot 6eea finding): 30 copies of a
+   * single typed line are one piece of evidence, not thirty. */
+  unique: number;
   need: number;
   mtimeMs: number;
-  matched: Map<number, string>;
+  matched: Map<string, string>;
   copiedAfterMtime: number;
   timeless: number;
 };
@@ -126,16 +136,39 @@ function sampleWindows(text: string): string[] {
 
 function beginLineage(artifact: ArtifactInput & { ok: true }): Lineage | null {
   if (artifact.kind !== "path" || artifact.mtimeMs === undefined) return null;
-  const chunks = sampleWindows(artifact.text);
+  return lineageFrom(artifact.text, artifact.mtimeMs);
+}
+
+export function lineageFrom(text: string, mtimeMs: number): Lineage | null {
+  const chunks = sampleWindows(text);
   if (chunks.length < LINEAGE_MIN_WINDOWS) return null;
+  const unique = new Set(chunks).size;
   return {
     chunks,
-    need: Math.max(2, Math.ceil(chunks.length * LINEAGE_UNION_RATIO)),
-    mtimeMs: artifact.mtimeMs,
+    unique,
+    need: Math.max(2, Math.ceil(unique * LINEAGE_UNION_RATIO)),
+    mtimeMs,
     matched: new Map(),
     copiedAfterMtime: 0,
     timeless: 0,
   };
+}
+
+export function lineageConvinced(lg: Lineage): boolean {
+  const n = lg.matched.size;
+  return (
+    n >= lg.need ||
+    (n >= LINEAGE_FLOOR_MIN && n >= Math.ceil(lg.unique * LINEAGE_FLOOR_RATIO))
+  );
+}
+
+/** time-gate + dedupe: one credit path, shared by the live scan and the dry run. */
+function creditWindows(lg: Lineage, cands: readonly string[], label: string): void {
+  for (const cand of cands) {
+    for (const chunk of lg.chunks) {
+      if (!lg.matched.has(chunk) && cand.includes(chunk)) lg.matched.set(chunk, label);
+    }
+  }
 }
 
 function messageTime(m: Msg): number | undefined {
@@ -157,11 +190,12 @@ function partCandidates(p: { tool?: string; input?: Record<string, unknown> }): 
 
 function lineageVerdict(lg: Lineage, artifact: ArtifactInput & { ok: true }): string {
   const sources = [...new Set([...lg.matched.values()])].slice(0, 3).join("; ");
+  const majority = lg.matched.size >= lg.need;
   return (
-    `content-lineage evidence: ${String(lg.matched.size)} of ${String(lg.chunks.length)} verbatim ` +
+    `content-lineage evidence: ${String(lg.matched.size)} of ${String(lg.unique)} DISTINCT verbatim ` +
     `${String(LINEAGE_CHUNK)}-byte windows of ${artifact.source} appear in convener-chain tool inputs ` +
-    `that predate its mtime (${sources}) — the chain authored this artifact's bytes before/independently ` +
-    `of this path`
+    `that predate its mtime (${sources}) — ${majority ? "majority" : "absolute floor"} of drafting; ` +
+    `repeated identical windows counted once`
   );
 }
 function scanMessages(
@@ -203,7 +237,8 @@ function scanMessages(
           continue; // after the artifact's last edit a part only ever copies FROM it
         }
         const label = `${p.tool ?? "tool"}@${sid}:${String(mi)}`;
-        for (const cand of partCandidates(p)) {
+        const cands = partCandidates(p);
+        for (const cand of cands) {
           if (artifact.kind === "path" && cand.includes(artifact.text.trim())) {
             return (
               `content-lineage evidence: the FULL text of ${artifact.source} appears verbatim in ${label} ` +
@@ -211,10 +246,8 @@ function scanMessages(
               `and moved them here; the chain cannot sit on both sides of this ballot`
             );
           }
-          for (const [wi, chunk] of lg.chunks.entries()) {
-            if (!lg.matched.has(wi) && cand.includes(chunk)) lg.matched.set(wi, label);
-          }
         }
+        creditWindows(lg, cands, label);
       }
     }
   }
@@ -286,7 +319,7 @@ export async function assessIndependence(
       return { status: "NOT-INDEPENDENT", convenerChain: chain, evidence: hit };
     }
   }
-  if (lg !== null && lg.matched.size >= lg.need) {
+  if (lg !== null && lineageConvinced(lg)) {
     return { status: "NOT-INDEPENDENT", convenerChain: chain, evidence: lineageVerdict(lg, artifact) };
   }
   if (scanFailed.length > 0 || walkIncomplete) {
@@ -305,7 +338,10 @@ export async function assessIndependence(
 /** What the clean verdict must confess about the lineage leg it ran. */
 function lineageFaceNote(lg: Lineage | null): string {
   if (lg === null) return "";
-  const parts = [`${String(lg.matched.size)}/${String(lg.chunks.length)} lineage windows matched (need ${String(lg.need)})`];
+  const parts = [
+    `${String(lg.matched.size)}/${String(lg.unique)} distinct lineage windows matched ` +
+    `(majority need ${String(lg.need)}, floor ${String(LINEAGE_FLOOR_MIN)}@${String(LINEAGE_FLOOR_RATIO * 100)}%)`,
+  ];
   if (lg.copiedAfterMtime > 0) parts.push(`${String(lg.copiedAfterMtime)} part(s) excluded as post-mtime copies`);
   if (lg.timeless > 0) parts.push(`${String(lg.timeless)} part(s) lacked timestamps`);
   return `; content-lineage: ${parts.join(", ")}`;
@@ -314,4 +350,31 @@ function lineageFaceNote(lg: Lineage | null): string {
 /** Receipt-face rendering used by all three entries. */
 export function independenceLabel(v: IndependenceVerdict): string {
   return v.status === "INDEPENDENT" ? "independence=INDEPENDENT" : `independence=${v.status} — ${v.evidence}`;
+}
+
+export type PreviewPart = { time: number; cands: readonly string[] };
+
+/** Offline dry run of the lineage law (same credit path, no engine needed):
+ * stages must prove their fixture arithmetic in seconds, not council rounds. */
+export function previewLineage(
+  text: string,
+  mtimeMs: number,
+  parts: readonly PreviewPart[],
+): { status: "WOULD-CONVICT" | "WOULD-READ-INDEPENDENT"; face: string; stats: string } {
+  const lg = lineageFrom(text, mtimeMs);
+  if (lg === null)
+    return { status: "WOULD-READ-INDEPENDENT", face: "artifact too small for the lineage leg (below window minimum)", stats: "windows<3" };
+  const trimmed = text.trim();
+  for (const [pi, part] of parts.entries()) {
+    if (part.time > mtimeMs) continue;
+    for (const cand of part.cands) if (cand.includes(trimmed))
+      return { status: "WOULD-CONVICT", face: `FULL text verbatim in part ${String(pi)} (pre-mtime)`, stats: "containment" };
+    creditWindows(lg, part.cands, `part#${String(pi)}`);
+  }
+  const stats =
+    `matched ${String(lg.matched.size)}/${String(lg.unique)} distinct windows, ` +
+    `majority need ${String(lg.need)}, floor ${String(LINEAGE_FLOOR_MIN)}>=${String(Math.ceil(lg.unique * LINEAGE_FLOOR_RATIO))} @${String(LINEAGE_FLOOR_RATIO * 100)}%`;
+  return lineageConvinced(lg)
+    ? { status: "WOULD-CONVICT", face: lineageVerdict(lg, { ok: true, kind: "path", source: "<preview>", text, mtimeMs }), stats }
+    : { status: "WOULD-READ-INDEPENDENT", face: "no conviction path fired", stats };
 }
