@@ -237,7 +237,7 @@ test("v2: template boilerplate (2 of 10 windows) is a minority => INDEPENDENT wi
   }]]));
   const v = await assessIndependence(m.client, "/work", "ses_c", LONG_ARTIFACT);
   assert.equal(v.status, "INDEPENDENT");
-  assert.match(v.evidence, /2\/10 lineage windows matched \(need 6\)/);
+  assert.match(v.evidence, /2\/10 distinct lineage windows matched \(majority need 6/);
 });
 
 test("v2: union across several parts reaches the majority => NOT-INDEPENDENT", async () => {
@@ -289,7 +289,7 @@ test("overlapping-window majority (8 parts x 2.4KB, 80% coverage) convicts via u
   const m = mock(new Map([["ses_c", { messages: parts }]]));
   const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: BIG, mtimeMs: 9_000_000_000_000 });
   assert.equal(v.status, "NOT-INDEPENDENT");
-  assert.match(v.evidence, /of \d+ verbatim 256-byte windows/); // F1: ceil-stride spreads windows across the WHOLE artifact
+  assert.match(v.evidence, /of \d+ DISTINCT verbatim 256-byte windows/); // F1: ceil-stride spreads windows across the WHOLE artifact
 });
 
 test("fragmented minority (25%) stays independent — the ratio is the law", async () => {
@@ -317,5 +317,42 @@ test("latter-67% drafting convicts (mid-size head-only sampler regression pin)",
   const m = mock(new Map([["ses_c", { messages: [part] }]]));
   const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: mid, mtimeMs: 9_000_000_000_000 });
   assert.equal(v.status, "NOT-INDEPENDENT");
-  assert.match(v.evidence, /of \d+ verbatim 256-byte windows/);
+  assert.match(v.evidence, /of \d+ DISTINCT verbatim 256-byte windows/);
+});
+
+// ——— v1.3.6 law deltas: dedupe (repetition inflation) + absolute floor (ratio evasion),
+// both surfaced by ballots 6eea/bbaf; each pinned with the failure it kills.
+test("repeated identical rows count ONCE (dedupe defense)", async () => {
+  const row = "DUP-ROW:" + "z".repeat(247) + "\n";
+  const art = row.repeat(60);
+  const part = timedWrite("write", { filePath: "/w/seed.md", content: row }, 1000);
+  const m = mock(new Map([["ses_c", { messages: [part] }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: art, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "INDEPENDENT");
+});
+
+test("absolute floor: ~40% distinct-typed drafting convicts below the majority line", async () => {
+  let head = "";
+  for (let i = 0; i < 18; i += 1) head += `H${String(i).padStart(3, "0")}:` + String(i).repeat(254).slice(0, 249) + "\n";
+  let typed = "";
+  for (let i = 0; i < 20; i += 1) typed += `T${String(i).padStart(3, "0")}:` + String(i * 7 + 1).repeat(254).slice(0, 249) + "\n";
+  let rest = "";
+  for (let i = 0; i < 10; i += 1) rest += `R${String(i).padStart(3, "0")}:` + String(i * 3 + 2).repeat(254).slice(0, 249) + "\n";
+  const art = head + typed + rest;
+  const part = timedWrite("write", { filePath: "/w/typed.md", content: typed }, 1000);
+  const m = mock(new Map([["ses_c", { messages: [part] }]]));
+  const v = await assessIndependence(m.client, "/w", "ses_c", { ok: true, kind: "path", source: "/work/a.md", text: art, mtimeMs: 9_000_000_000_000 });
+  assert.equal(v.status, "NOT-INDEPENDENT");
+  assert.match(v.evidence, /absolute floor of drafting/);
+});
+
+test("previewLineage dry-runs the exact law offline (stage-check core)", async () => {
+  const { previewLineage } = await import("../src/independence.ts");
+  let text = "";
+  for (let i = 0; i < 40; i += 1) text += `P${String(i).padStart(3, "0")}:` + String(i * 11).repeat(254).slice(0, 249) + "\n";
+  const parts = [{ time: 500, cands: [text.slice(0, 1500)] }];
+  const r = previewLineage(text, 10_000, parts);
+  assert.equal(r.status, "WOULD-READ-INDEPENDENT");
+  const r2 = previewLineage(text, 10_000, [{ time: 500, cands: [text] }]);
+  assert.equal(r2.status, "WOULD-CONVICT");
 });
