@@ -176,7 +176,7 @@ function messageTime(m: Msg): number | undefined {
   return typeof t === "number" ? t : undefined;
 }
 
-function partCandidates(p: { tool?: string; input?: Record<string, unknown> }): string[] {
+export function partCandidates(p: { tool?: string; input?: Record<string, unknown> }): string[] {
   const shell = p.tool !== undefined && (SHELL_TOOLS as readonly string[]).includes(p.tool);
   if (!shell && !isDraftingTool(p.tool)) return [];
   const keys: readonly string[] = shell ? SHELL_KEYS : CONTENT_KEYS;
