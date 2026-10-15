@@ -25,9 +25,10 @@ for (let d = 0; d < 16; d += 1) {
 const parts = [];
 let skippedAfterMtime = 0, timeless = 0;
 for (const sid of chain) {
-  const res = await client.session.messages({ path: { id: sid } });
+  const res = await client.session.messages({ path: { id: sid }, query: { directory: process.cwd() } });
   for (const [mi, m] of (res?.data ?? []).entries()) {
-    for (const p of m.parts ?? []) {
+    for (const raw of m.parts ?? []) {
+      const p = { type: raw.type, tool: raw.tool, input: raw.input ?? raw.state?.input };
       const cands = partCandidates(p);
       if (cands.length === 0) continue;
       const t = m?.info?.time?.created;
