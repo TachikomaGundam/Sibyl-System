@@ -23,4 +23,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: ./ship.sh
+      - run: npm run coverage
       - run: npm audit --audit-level=high
