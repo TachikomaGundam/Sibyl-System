@@ -39,6 +39,8 @@ type RepoOpts = {
   /** dirty the worktree package.json after commit+tag (the W4 version-side red) */
   pkgWorktreeOverride?: string;
   annotated?: boolean;
+  /** annotated-tag message body (default: the release subject line only) */
+  tagMessage?: string;
 };
 
 async function makeRepo(opts: RepoOpts): Promise<{ dir: string; oid: string }> {
@@ -51,7 +53,7 @@ async function makeRepo(opts: RepoOpts): Promise<{ dir: string; oid: string }> {
   }
   await git(dir, "add", "-A");
   await git(dir, "commit", "--quiet", "-m", "release commit");
-  await git(dir, opts.annotated === false ? "tag" : "tag", ...(opts.annotated === false ? [] : ["-a"]), opts.tag, ...(opts.annotated === false ? [] : ["-m", `release ${opts.tag}`]));
+  await git(dir, opts.annotated === false ? "tag" : "tag", ...(opts.annotated === false ? [] : ["-a"]), opts.tag, ...(opts.annotated === false ? [] : ["-m", opts.tagMessage ?? `release ${opts.tag}`]));
   if (opts.receiptInWorktree && !opts.receiptInTag) {
     await writeFile(join(dir, "docs", "release", `${opts.tag}.md`), receiptBody(opts.tag), "utf8");
   }
@@ -334,4 +336,64 @@ test("W4-14b update push fully compliant (nonzero remote oid) → pass", async (
   const res = await drive(dir, [`refs/tags/v9.9.9 ${oid} refs/tags/v9.9.9 ${"2".repeat(40)}`], lease);
   assert.equal(res.crashed, false, res.stderr);
   assert.equal(res.code, 0, res.stderr);
+});
+
+// v1.5.0 tag-body hygiene (queue §3.6): the pushed tag MESSAGE is public
+// release content — machine paths and email shapes refuse by rule name,
+// and a compliant anchor-style body (hashes, run ids, formulas) must pass.
+
+test("W4-HY-1 tag body with a /home/ clone path → refuse (tag-body-home-path)", async (t) => {
+  const { dir, oid } = await makeRepo({
+    tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true,
+    tagMessage: "release v9.9.9\n\npersistent working clone: /home/lab/workspace/harness/Sibyl\n",
+  });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /tag-body-home-path/);
+  assert.doesNotMatch(res.stderr, /\/home\/lab/, "refusal must not echo the offender line");
+});
+
+test("W4-HY-2 tag body with an email shape → refuse (tag-body-email)", async (t) => {
+  const { dir, oid } = await makeRepo({
+    tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true,
+    tagMessage: "release v9.9.9\n\nreport questions to release@machine.internal\n",
+  });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.code, 1);
+  assert.match(res.stderr, /tag-body-email/);
+});
+
+test("W4-HY-3 compliant anchor body (hashes/run-ids/formula, tagger email in header only) → pass", async (t) => {
+  const { dir, oid } = await makeRepo({
+    tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true,
+    tagMessage: [
+      "release v9.9.9 — hygiene wheel",
+      "",
+      "anchor set (per the anchor law):",
+      "carrier: abc1234; packet blob sha256: 5b7df0c00839d6bb",
+      "final gate scan (head abc1234, dirty=False, PASS): report .border/runs/1fe91843-2026-10-23T12-02-56-528Z/report.json sha256 cb715199db7c6aba",
+      "blind audit: final round sibyl-20261023T120323Z-7e70 = APPROVE 2A/1R/0E/0M rules=9713b034cfd5",
+      "boundary: git log --format=%h v1.4.0..v1.5.0^{commit}",
+      "lease: v9.9.9 held by abathur-sibyl-window at tag mint",
+    ].join("\n"),
+  });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 0, res.stderr);
+});
+
+test("W4-HY-4 lightweight tag (no message body) → hygiene scan exempt", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true, annotated: false });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 0, res.stderr);
+  void oid;
 });
