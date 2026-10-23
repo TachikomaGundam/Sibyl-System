@@ -15,5 +15,6 @@ jobs:
           node-version: 22
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm test
+      - run: ./ship.sh
+      - run: npm audit --audit-level=high
       - run: npm publish --provenance
