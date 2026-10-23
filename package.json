@@ -32,6 +32,7 @@
     "typecheck": "tsc --noEmit",
     "build": "esbuild src/index.ts --bundle --format=esm --platform=node --outfile=dist/index.js && esbuild src/cli.ts --bundle --format=esm --platform=node --banner:js='#!/usr/bin/env node' --outfile=dist/cli.js",
     "test": "node --import ./tools/register-ts.mjs --test test/*.test.ts",
+    "coverage": "node --import ./tools/register-ts.mjs --test --experimental-test-coverage \"--test-coverage-include=src/**\" --test-coverage-lines=55 --test-coverage-branches=80 --test-coverage-functions=90 test/*.test.ts",
     "prepack": "npm run build"
   },
   "dependencies": {
