@@ -15,10 +15,14 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { errMessage } from "./util.ts";
+
 /** Default model-pool slot name every persona falls back to. */
 export const DEFAULT_SLOT = "default";
 
-/** Engine parity: same 240s default as src/engine/index.ts DEFAULT_TIMEOUT_MS. */
+/** THE single definition of the per-persona-call budget default (v1.5.0
+ * L-SINGLE-SOURCE): engine and swarm minter import this, no parity comment
+ * anywhere — this module is the home of config defaults. */
 export const DEFAULT_TIMEOUT_MS = 240_000;
 
 /** One model-pool entry: a concrete provider/model pair. */
@@ -136,10 +140,6 @@ function formatIssue(issue: ReadableIssue): string {
   return `${path}: ${issue.message}`;
 }
 
-function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 /**
  * Parse untrusted plugin config into fully-defaulted PluginOptions.
  * Absent config (undefined) means "all defaults". Any other invalid input -
@@ -184,7 +184,7 @@ export function parseOptions(raw: unknown): ParseOptionsResult {
   } catch (err) {
     return {
       ok: false,
-      errors: [`options threw during parsing and was rejected: ${describeError(err)}`],
+      errors: [`options threw during parsing and was rejected: ${errMessage(err)}`],
     };
   }
 }

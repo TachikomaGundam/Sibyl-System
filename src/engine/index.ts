@@ -29,6 +29,9 @@
 // Concurrency: no module-level mutable state — safe for the council's
 // `Promise.all(personas.map(runPersona))` fan-out.
 
+import { DEFAULT_TIMEOUT_MS } from "../options.ts";
+import { errMessage, withTimeout } from "../util.ts";
+
 export type PersonaRunResult = {
   text: string;
   ok: boolean;
@@ -66,7 +69,7 @@ export type PersonaRunResult = {
  *   - returns are `{ data?, error? }` shaped: the SDK resolves
  *     `{ data, error, response }` and never throws; `data` is typed to the
  *     few fields this module reads, `error` stays `unknown` (it is described
- *     via describeError, never re-typed).
+ *     via errMessage, never re-typed).
  */
 export type EngineClient = {
   session: {
@@ -158,40 +161,10 @@ export type RunPersonaOptions = {
   parentID?: string | undefined;
 };
 
-const DEFAULT_TIMEOUT_MS = 240_000;
 /** Single source of truth for the voter/worker tool-gate (audit F1): every
  * name mapped to false in a prompt body's `tools` — exported so the tools
  * layer's follow-up turns (runInSession) apply the identical gate. */
 export const DEFAULT_DISALLOWED_TOOLS = ["bash", "edit", "write"];
-
-/**
- * Promise.race guard with the timer cleared in finally (probe server.js:23-31).
- * On expiry the race rejects with an Error whose message contains "timeout",
- * which the caller maps to a structured {ok:false, stage, error} result.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
-    }),
-  ]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  });
-}
-
-/** Render an unknown error value as a stable string for the structured result. */
-function describeError(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  try {
-    const json = JSON.stringify(e);
-    return json === undefined ? String(e) : json;
-  } catch {
-    return String(e);
-  }
-}
 
 const DEFAULT_SALVAGE_POLL_MS = 5_000;
 
@@ -242,11 +215,11 @@ async function salvageAfterPromptTimeout(
       path: { id: sessionID },
       query: { directory },
     });
-    if (res.error !== undefined) return { kind: "error", error: describeError(res.error) };
+    if (res.error !== undefined) return { kind: "error", error: errMessage(res.error) };
     const lastAssistant = (res.data ?? []).filter((m) => m.info?.role === "assistant").at(-1);
     const info = lastAssistant?.info;
     if (!info) continue;
-    if (info.error !== undefined) return { kind: "error", error: describeError(info.error) };
+    if (info.error !== undefined) return { kind: "error", error: errMessage(info.error) };
     if (typeof info.time?.completed === "number") {
       const text = (lastAssistant?.parts ?? [])
         .filter((p) => p.type === "text" && typeof p.text === "string")
@@ -293,7 +266,7 @@ async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Prom
       timeoutMs,
       "session.create",
     );
-    if (created.error) return fail(describeError(created.error));
+    if (created.error) return fail(errMessage(created.error));
     const sessionID = created.data?.id;
     if (!sessionID) return fail("session.create: response missing data.id");
 
@@ -322,7 +295,7 @@ async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Prom
         "session.prompt",
       );
     } catch (e) {
-      const promptFailure = e instanceof Error ? e.message : describeError(e);
+      const promptFailure = e instanceof Error ? e.message : errMessage(e);
       if (!SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(promptFailure)) throw e;
       const graceMs = opts.salvageMs ?? timeoutMs;
       const outcome = await salvageAfterPromptTimeout(
@@ -347,13 +320,13 @@ async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Prom
       };
     }
     if (prompted.error) {
-      const channel = describeError(prompted.error);
+      const channel = errMessage(prompted.error);
       return SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(channel) ? { ...fail(channel), retryable: true } : fail(channel);
     }
     if (!prompted.data) return fail("session.prompt: response missing data payload");
     const info = prompted.data.info;
     // Child LLM failure surfaces as info.error — check both failure channels.
-    if (info?.error) return fail(describeError(info.error));
+    if (info?.error) return fail(errMessage(info.error));
     const modelApplied =
       info?.providerID && info?.modelID ? `${info.providerID}/${info.modelID}` : null;
     const text = (prompted.data.parts ?? [])
@@ -378,7 +351,7 @@ async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Prom
   } catch (e) {
     // Any unexpected throw (timeout rejection, broken client) is captured here:
     // timeouts carry their stage ("create" | "prompt") via the stage tracker.
-    const thrown = e instanceof Error ? e.message : describeError(e);
+    const thrown = e instanceof Error ? e.message : errMessage(e);
     return SALVAGE_ELIGIBLE_PROMPT_FAILURE.test(thrown) ? { ...fail(thrown), retryable: true } : fail(thrown);
   }
 }

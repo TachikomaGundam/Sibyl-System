@@ -29,7 +29,8 @@ import { planWorkflow } from "../swarm/planner.ts";
 import type { SwarmReport, SwarmVerdict } from "../swarm/types.ts";
 import type { RunRecord } from "../state/index.ts";
 import { buildRepairDemand } from "./consult.ts";
-import { errMessage, internalError, readArtifact, slotForModel } from "./shared.ts";
+import { internalError, readArtifact, slotForModel } from "./shared.ts";
+import { errMessage } from "../util.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
 export const SWARM_TOOL_NAME = "sibyl_swarm";
