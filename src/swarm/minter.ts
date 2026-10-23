@@ -7,6 +7,7 @@
 // NO fixed roster constant here (F5 gate). Unknown pool slots and empty
 // inputs produce structured {ok:false, stage:"mint", error}, never a throw.
 
+import { DEFAULT_TIMEOUT_MS } from "../options.ts";
 import type { MintResult, ModelPool, PersonaLike, WorkerSpec, WorkflowSchema, WorkflowTask } from "./types.ts";
 
 export type MintOptions = {
@@ -21,7 +22,6 @@ export type MintOptions = {
 };
 
 export const DEFAULT_ROUND_BUDGET = 3;
-export const DEFAULT_TIMEOUT_MS = 240_000;
 
 /** Keep worker ids readable yet deterministic: worker-<index>-<slug(taskId)>. */
 function slugify(id: string): string {
