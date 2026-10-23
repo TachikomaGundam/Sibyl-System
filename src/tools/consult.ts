@@ -24,7 +24,8 @@ import { classifyFailure, deadFaceCount, deadWithoutRecord, formatTerminalRow, p
 import { parseVerdict } from "../verdict/index.ts";
 import { PERSONAS, repairDemand } from "../personas.ts";
 import type { RunRecord } from "../state/index.ts";
-import { errMessage, internalError, readArtifact, runInSession, slotForModel } from "./shared.ts";
+import { internalError, readArtifact, runInSession, slotForModel } from "./shared.ts";
+import { errMessage } from "../util.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
 export const CONSULT_TOOL_NAME = "sibyl_consult";

@@ -17,6 +17,7 @@ import type { EngineClient, PersonaRunResult } from "../engine/index.ts";
 import type { ModelSlot } from "../swarm/types.ts";
 import type { RunRecord, RunStore } from "../state/index.ts";
 import type { PluginOptions } from "../options.ts";
+import { errMessage, withTimeout } from "../util.ts";
 
 /**
  * The slice of the SDK ToolContext the tools consume. Structurally compatible
@@ -124,41 +125,14 @@ export async function readArtifact(raw: string, cwd: string): Promise<ArtifactIn
   return { ok: true, kind: "path", source: path, text, mtimeMs: info.mtimeMs };
 }
 
-/** Render an unknown error value as a stable string (engine describeError parity:
- * object errors JSON.stringify — "[object Object]" would erase the evidence). */
-export function errMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    const json = JSON.stringify(err);
-    return json === undefined ? String(err) : json;
-  } catch {
-    return String(err);
-  }
-}
-
 /**
  * The single funnel every tool execute() wraps its body in: a throw must
  * never surface to the host as an opaque crash (spike/GO.md error-handling
- * note — it would lose all structured evidence).
+ * note — it would lose all structured evidence). Error rendering itself is
+ * the ONE errMessage in src/util.ts (v1.5.0 single-source law).
  */
 export function internalError(toolName: string, err: unknown): string {
   return `SIBYL ${toolName} internal error: ${errMessage(err)}`;
-}
-
-/** Promise.race guard with the timer cleared in finally (engine pattern). */
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timeout after ${String(ms)}ms`)), ms);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
 }
 
 /**
