@@ -44,8 +44,8 @@ import type { ToolDeps } from "./tools/shared.ts";
 export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
   return {
     session: {
-      async delete(args: { path: { id: string } }) {
-        return await sdk.session.delete(args as never);
+      async delete(args) {
+        return await sdk.session.delete({ path: { id: args.path.id }, query: { directory: args.query.directory } });
       },
       async create(args) {
         const r = await sdk.session.create({
@@ -130,8 +130,8 @@ export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
           ...(r.error !== undefined && { error: r.error }),
         };
       },
-      async get(args: { path: { id: string } }) {
-        const r = await sdk.session.get(args as never);
+      async get(args) {
+        const r = await sdk.session.get({ path: { id: args.path.id }, query: { directory: args.query.directory } });
         return {
           ...(r.data !== undefined && {
             data: {

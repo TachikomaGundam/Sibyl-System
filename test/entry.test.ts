@@ -233,9 +233,9 @@ test("toEngineClient forwards parentID into the SDK create body; absent stays ab
 
 test("toEngineClient forwards session.delete (headless GC dependency)", async () => {
   const calls: string[] = [];
-  const sdk = { session: { create: async () => ({ data: { id: "x" } }), prompt: async () => ({}), messages: async () => ({ data: [] }), delete: async (a: { path: { id: string } }) => { calls.push(a.path.id); return {}; } } } as never;
+  const sdk = { session: { create: async () => ({ data: { id: "x" } }), prompt: async () => ({}), messages: async () => ({ data: [] }), delete: async (a: { path: { id: string }; query: { directory: string } }) => { calls.push(a.path.id); return {}; } } } as unknown as PluginInput["client"];
   const ec = toEngineClient(sdk);
   if (!ec.session.delete) throw new Error("delete not forwarded");
-  await ec.session.delete({ path: { id: "ses_v" } });
+  await ec.session.delete({ path: { id: "ses_v" }, query: { directory: "/tmp" } });
   if (calls[0] !== "ses_v") throw new Error("delete not wired to sdk");
 });
