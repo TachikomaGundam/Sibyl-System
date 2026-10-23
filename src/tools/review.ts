@@ -29,15 +29,22 @@ export function nodeBinary(): string {
   return existsSync("/usr/bin/node") ? "/usr/bin/node" : process.execPath;
 }
 
-/** Locate the CLI entry from either runtime position (src/tools dev, dist bundle). */
+/** Locate the CLI entry from either runtime position (src/tools dev, dist bundle).
+ * Bundle position (npm install, or repo dist/) sits one dirname below its root;
+ * the dev src/tools position sits two. Probe both roots for a real entry —
+ * guessing one layout spawned a dead path and a silent chamber death (2026-10-23). */
 export function cliCommand(thisUrl: string, node: string): { bin: string; args: string[] } {
-  const moduleDir = dirname(fileURLToPath(thisUrl)); // .../src/tools or .../dist
-  const repoRoot = dirname(dirname(moduleDir));
-  const distCli = join(repoRoot, "dist", "cli.js");
-  if (existsSync(distCli)) return { bin: node, args: [distCli] };
-  const srcCli = join(repoRoot, "src", "cli.ts");
-  const hooks = join(repoRoot, "tools", "register-ts.mjs");
-  return { bin: node, args: ["--import", hooks, srcCli] };
+  const moduleDir = dirname(fileURLToPath(thisUrl)); // .../dist (bundle) or .../src/tools (dev)
+  const roots = [dirname(moduleDir), dirname(dirname(moduleDir))];
+  for (const root of roots) {
+    const distCli = join(root, "dist", "cli.js");
+    if (existsSync(distCli)) return { bin: node, args: [distCli] };
+    const srcCli = join(root, "src", "cli.ts");
+    const hooks = join(root, "tools", "register-ts.mjs");
+    if (existsSync(srcCli) && existsSync(hooks)) return { bin: node, args: ["--import", hooks, srcCli] };
+  }
+  const repoRoot = roots[1] ?? dirname(dirname(moduleDir));
+  return { bin: node, args: ["--import", join(repoRoot, "tools", "register-ts.mjs"), join(repoRoot, "src", "cli.ts")] };
 }
 
 export type ReviewArgs = {

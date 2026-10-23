@@ -8,6 +8,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { parseCliArgs, resolveRun, splitModelId, examVoice } from "../src/cli.ts";
 import { cliCommand, nodeBinary, reviewExecute } from "../src/tools/review.ts";
@@ -110,6 +111,23 @@ test("nodeBinary + cliCommand resolve dev-layout entry", () => {
   const cmd = cliCommand(import.meta.url, node);
   assert.equal(cmd.bin, node);
   assert.ok(cmd.args.some((a) => a.includes("cli.")), JSON.stringify(cmd.args));
+});
+
+// injury regression 2026-10-23: the installed (npm) layout broke the dist probe —
+// cliCommand walked TWO dirnames up from .../sibyl-system/dist and landed in
+// node_modules/ (no dist, no src), then spawned the dead --import src/cli.ts
+// fallback with stdio:"ignore": the whole review chamber lane died silently
+// (receipt issued, zero artifacts). The bundle position must resolve <pkg>/dist/cli.js.
+test("cliCommand resolves installed bundle layout to <pkg>/dist/cli.js", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-layout-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pkgDist = join(dir, "node_modules", "sibyl-system", "dist");
+  await mkdir(pkgDist, { recursive: true });
+  await writeFile(join(pkgDist, "index.js"), "export {}", "utf8");
+  await writeFile(join(pkgDist, "cli.js"), "#!/usr/bin/env node\n", "utf8");
+  const cmd = cliCommand(pathToFileURL(join(pkgDist, "index.js")).href, "/usr/bin/node");
+  assert.equal(cmd.bin, "/usr/bin/node");
+  assert.deepEqual(cmd.args, [join(pkgDist, "cli.js")]);
 });
 
 test("reviewExecute error doors return strings, never throw, never spawn", async (t) => {
