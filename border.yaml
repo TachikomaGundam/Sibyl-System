@@ -36,3 +36,7 @@ allow:
   - { rule: "*", match: "*", file: "src/tools/consult.ts" }
   # Gate config necessarily names the machine path it guards (self-detection, not a secret).
   - { rule: "*", match: "*", file: "border.yaml" }
+  # The push gate's OWN v1.5.0 tag-body hygiene regexes necessarily contain the
+  # shapes they hunt (home-path + Windows-path literals in the refusal rules).
+  # Same self-detection class as the consult.ts entry above.
+  - { rule: "*", match: "*", file: "scripts/git-hooks/pre-push" }
