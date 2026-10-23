@@ -77,7 +77,7 @@ export type EngineClient = {
       body: { title: string; parentID?: string | undefined };
       query: { directory: string };
     }): Promise<{ data?: { id?: string }; error?: unknown }>;
-    delete?(args: { path: { id: string } }): Promise<{ error?: unknown }>;
+    delete?(args: { path: { id: string }; query: { directory: string } }): Promise<{ error?: unknown }>;
     /**
      * Read-only session header, W1 (convener-recusal): `parentID` is what lets
      * the instrument walk the calling chain against the engine's own store —
@@ -85,7 +85,7 @@ export type EngineClient = {
      * purpose: mocks without it get the honest UNVERIFIABLE independence
      * state (the read cannot be made, so the claim cannot be checked).
      */
-    get?(args: { path: { id: string } }): Promise<{
+    get?(args: { path: { id: string }; query: { directory: string } }): Promise<{
       data?: { id?: string; parentID?: string };
       error?: unknown;
     }>;
@@ -342,7 +342,7 @@ async function runPersonaAttempt(opts: RunPersonaOptions, attempt: number): Prom
     const headless = parentID === undefined || parentID.length === 0;
     if (headless && client.session.delete !== undefined) {
       try {
-        await client.session.delete({ path: { id: sessionID } });
+        await client.session.delete({ path: { id: sessionID }, query: { directory } });
       } catch {
         // GC is best-effort: a failed delete leaves a stray row, never a lost vote.
       }

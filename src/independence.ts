@@ -288,7 +288,7 @@ export async function assessIndependence(
   let walkReason = "";
   let current = convenerSessionID;
   for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth += 1) {
-    const res = await client.session.get({ path: { id: current } });
+    const res = await client.session.get({ path: { id: current }, query: { directory } });
     if (res.error !== undefined || res.data === undefined) {
       walkIncomplete = true;
       walkReason = `session.get(${current}) refused (${res.error === undefined ? "no data" : JSON.stringify(res.error).slice(0, 120)})`;
