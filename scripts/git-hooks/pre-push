@@ -67,6 +67,22 @@ police_name() { # $1=ref name to police, $2=pushed oid
   lease_ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LEASE_FILE" | head -n 1)"
   [ "$lease_ver" = "$ver" ] \
     || block "lease at $LEASE_FILE does not name $ver (found \"$lease_ver\") — is another seat holding the wheel?"
+  # v1.5.0 tag-body hygiene (handoff queue §3.6, root cause: the v1.4.0 tag
+  # message carried one /home/... clone path onto the public remote): the tag
+  # MESSAGE is release content and rides the push. Annotated-tag bodies are
+  # scanned for machine-local shapes; refusals name the rule, never the line
+  # (a block message that echoes the offender would leak it all over logs).
+  # The tagger FIELD is out of scope: registered commit identities are policed
+  # by the gate's authors rules — the scan judges the message only.
+  if [ "$(git cat-file -t "$oid" 2>/dev/null)" = "tag" ]; then
+    body="$(git cat-file tag "$oid" 2>/dev/null | awk 'b==1{print} NF==0{b=1}')"
+    if printf '%s\n' "$body" | grep -qiE '/home/|/users/|/root/|\\home\\|\\users\\|\\root\\'; then
+      block "tag $ver message body contains a home-path shape (rule tag-body-home-path) — the pushed tag is public; anchor the clone by hash, not by machine path"
+    fi
+    if printf '%s\n' "$body" | grep -qE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z][A-Za-z]+'; then
+      block "tag $ver message body contains an email-address shape (rule tag-body-email) — the pushed tag is public; identities ride the tagger field, not the message"
+    fi
+  fi
 }
 
 while read -r local_ref local_oid remote_ref remote_oid; do
