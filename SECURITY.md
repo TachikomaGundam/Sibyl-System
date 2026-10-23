@@ -54,4 +54,9 @@ with you; a fix lands as its own release wheel with the advisory referenced.
   bounded: HEAD, zero payload, no credential, redirects not followed
   (`redirect: "manual"`).
 - The model-pool trust boundary is the operator's configuration, not the plugin.
+- The release laws (W4 receipt-in-tag, tag-body hygiene) are enforced by a
+  **client-side pre-push hook**: every clone installs it explicitly
+  (`scripts/install-hooks.sh`; the package ships no hooks), and `--no-verify`
+  bypasses it. They discipline this project's own release wheels — they are
+  not, and do not claim to be, server-enforced protection.
 - Coverage floors are a quality ratchet, not a security proof.
