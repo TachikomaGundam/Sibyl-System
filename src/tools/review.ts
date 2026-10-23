@@ -9,7 +9,8 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
+import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,7 +69,7 @@ export async function reviewExecute(
     const now = new Date();
     const runId = `sibyl-${compactIso(now)}-${randomBytes(2).toString("hex")}`;
     const runDir = join(opts.lane.runRoot, `sibyl-run-${runId}`);
-    await mkdir(runDir, { recursive: true });
+    await mkdirPrivate(runDir);
 
     const artifact = await readArtifact(args.target, context.directory);
     if (!artifact.ok) return `SIBYL review: ${artifact.error}`;

@@ -13,7 +13,8 @@
 // workspace dirs under <spaceRoot>/<runId>/.
 
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdirPrivate } from "../fsperm.ts";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -124,7 +125,7 @@ export class RunStore {
    * which briefly widens the crash window but never writes torn JSON. */
   async save(records: readonly RunRecord[], opts?: SaveOptions): Promise<void> {
     const dir = dirname(this.runsFile);
-    await mkdir(dir, { recursive: true });
+    await mkdirPrivate(dir);
     const tmp = join(dir, `runs.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
     const renameStep = opts?.rename ?? this.renameFile;
     try {
@@ -171,7 +172,7 @@ export class RunStore {
     const now = new Date();
     const runId = `sibyl-${compactIso(now)}-${randomBytes(2).toString("hex")}`;
     const spaceDir = join(input.spaceRootDir ?? this.spaceRoot, runId);
-    await mkdir(spaceDir, { recursive: true });
+    await mkdirPrivate(spaceDir);
     const record: RunRecord = {
       runId,
       kind: input.kind,

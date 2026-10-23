@@ -13,7 +13,8 @@
 
 import { spawn } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
 
 import { resolveSeat, type SeatPolicy, type SeatPool } from "./seating.ts";
@@ -89,12 +90,12 @@ export async function prepareRoleHome(
   role: string,
 ): Promise<{ paths: RolePaths; env: NodeJS.ProcessEnv }> {
   const paths = rolePaths(cfg, role);
-  await mkdir(join(paths.home, ".config", "opencode"), { recursive: true });
-  await mkdir(dirname(paths.dbPath), { recursive: true });
-  await mkdir(join(paths.home, ".cache", "opencode"), { recursive: true });
-  await mkdir(join(paths.home, ".local", "state", "opencode"), { recursive: true });
-  await mkdir(paths.workspace, { recursive: true });
-  await mkdir(join(cfg.runDir, "pids"), { recursive: true });
+  await mkdirPrivate(join(paths.home, ".config", "opencode"));
+  await mkdirPrivate(dirname(paths.dbPath));
+  await mkdirPrivate(join(paths.home, ".cache", "opencode"));
+  await mkdirPrivate(join(paths.home, ".local", "state", "opencode"));
+  await mkdirPrivate(paths.workspace);
+  await mkdirPrivate(join(cfg.runDir, "pids"));
   try {
     if (cfg.configSource.length > 0) {
       await copyFile(cfg.configSource, join(paths.home, ".config", "opencode", "opencode.jsonc"));

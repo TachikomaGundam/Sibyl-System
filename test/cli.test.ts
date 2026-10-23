@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -194,7 +194,7 @@ test("W1 launch-context.json: staged independence finding rides the chamber reco
   assert.deepEqual(r.ok ? r.run.chamber?.independence : undefined, verdict);
 });
 
-test("W1 launch-context (amended 2026-10: absence-must-be-named): malformed staged shape => UNVERIFIABLE leg, never a crash, never a fake", async (t) => {
+test("F-W1b option 3 (run 16a2): malformed context on a BARE launch => named UNVERIFIABLE leg, never a crash, never a fake", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-bad-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const runId = "sibyl-TEST-badctx-0002";
@@ -203,11 +203,67 @@ test("W1 launch-context (amended 2026-10: absence-must-be-named): malformed stag
   const target = join(dir, "art.md");
   await writeFile(target, "artifact body\n", "utf8");
   await writeFile(join(runDir, "launch-context.json"), JSON.stringify({ independence: { status: "GUILT-BY-ASSOCIATION" } }), "utf8");
-  const r = await resolveRun({ target, goal: "g", "run-id": runId, "run-root": dir });
+  const r = await resolveRun({ target, goal: "g", "run-root": dir }); // bare: no --run-id
   assert.ok(r.ok, r.ok ? "" : r.error);
   const ind = r.ok ? r.run.chamber?.independence : undefined;
   assert.equal(ind?.status, "UNVERIFIABLE");
-  assert.match(ind?.evidence ?? "", /malformed/);
+  assert.match(ind?.evidence ?? "", /bare CLI launch/);
+});
+
+test("F-W1b option 3 (run 16a2): explicit --run-id with missing or malformed launch-context => REFUSE + refusal record, never a service", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-refuse-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const target = join(dir, "art.md");
+  await writeFile(target, "artifact body\n", "utf8");
+
+  const missing = await resolveRun({ target, goal: "g", "run-id": "sibyl-TEST-refuse-1", "run-root": dir });
+  assert.ok(!missing.ok);
+  assert.match(missing.ok ? "" : missing.error, /no launch-context staged in the run dir/);
+  const rec1 = JSON.parse(await readFile(join(dir, "sibyl-run-sibyl-TEST-refuse-1", "launch-refusal.json"), "utf8"));
+  assert.equal(rec1.kind, "refused-launch");
+
+  const badRunId = "sibyl-TEST-refuse-2";
+  const badRunDir = join(dir, `sibyl-run-${badRunId}`);
+  await mkdir(badRunDir, { recursive: true });
+  await writeFile(join(badRunDir, "launch-context.json"), JSON.stringify({ independence: { status: "GUILT-BY-ASSOCIATION" } }), "utf8");
+  const bad = await resolveRun({ target, goal: "g", "run-id": badRunId, "run-root": dir });
+  assert.ok(!bad.ok);
+  assert.match(bad.ok ? "" : bad.error, /malformed/);
+  const rec2 = JSON.parse(await readFile(join(badRunDir, "launch-refusal.json"), "utf8"));
+  assert.equal(rec2.runId, badRunId);
+});
+
+test("F-W1b self-report guard (run 16a2): the regenerated run-record face outvouches a contradicted staged context", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-lc-face-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const runId = "sibyl-TEST-face-1";
+  const runDir = join(dir, `sibyl-run-${runId}`);
+  await mkdir(runDir, { recursive: true });
+  const target = join(dir, "art.md");
+  await writeFile(target, "artifact body\n", "utf8");
+  await writeFile(join(runDir, "launch-context.json"), JSON.stringify({
+    convenerSessionID: "ses_x",
+    independence: { status: "INDEPENDENT", convenerChain: [], evidence: "staged claim" },
+  }), "utf8");
+  await writeFile(join(runDir, "run-record.json"), JSON.stringify({
+    independence: { status: "NOT-INDEPENDENT", convenerChain: ["ses_x"], evidence: "lineage: write part drafted the artifact" },
+  }), "utf8");
+  const r = await resolveRun({ target, goal: "g", "run-id": runId, "run-root": dir });
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  const ind = r.ok ? r.run.chamber?.independence : undefined;
+  assert.equal(ind?.status, "NOT-INDEPENDENT");
+  assert.match(ind?.evidence ?? "", /record wins/);
+});
+
+test("v1.4.0 private-dir law: a fresh run dir created by resolveRun is unreachable to group/other", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-mode-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const target = join(dir, "art.md");
+  await writeFile(target, "artifact body\nsecond\n", "utf8");
+  const r = await resolveRun({ target, goal: "g", "run-root": dir }); // bare launch, fresh runDir
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  const runId = r.ok ? r.run.runId : "";
+  assert.equal(statSync(join(dir, `sibyl-run-${runId}`)).mode & 0o077, 0);
 });
 
 // ---- W1 chamber launch-context: absence is a named UNVERIFIABLE, never a silent hole
@@ -238,7 +294,11 @@ test("resolveRun: bare CLI launch (no launch-context) => chamber carries UNVERIF
   assert.match(r.run.chamber?.independence?.evidence ?? "", /bare CLI launch/);
 });
 
-test("resolveRun: malformed staged launch-context => UNVERIFIABLE 'malformed', not trusted, not silent", async (t) => {
+// Policy flip locked by owner ruling 2026-10-23 (council run 16a2): the explicit
+// --run-id lane REFUSES a malformed launch-context instead of serving UNVERIFIABLE —
+// an id pinned to a tool launch whose tool never staged its finding is a lie about
+// provenance, not an absence. The bare lane above still serves the named UNVERIFIABLE.
+test("resolveRun: malformed staged launch-context on an explicit --run-id => REFUSE + record (policy flip 16a2)", async (t) => {
   const { dir, configPath, target } = await chamberBase();
   t.after(() => rm(dir, { recursive: true, force: true }));
   const first = await resolveRun({ target, goal: "g", config: configPath });
@@ -246,10 +306,11 @@ test("resolveRun: malformed staged launch-context => UNVERIFIABLE 'malformed', n
   if (!first.ok) return;
   await writeFile(join(first.run.runDir, "launch-context.json"), JSON.stringify({ convenerSessionID: "x", independence: { status: "BOGUS" } }), "utf8");
   const r = await resolveRun({ target, goal: "g", config: configPath, "run-id": first.run.runId });
-  assert.ok(r.ok);
-  if (!r.ok) return;
-  assert.equal(r.run.chamber?.independence?.status, "UNVERIFIABLE");
-  assert.match(r.run.chamber?.independence?.evidence ?? "", /malformed/);
+  assert.ok(!r.ok);
+  assert.match(r.ok ? "" : r.error, /malformed/);
+  const rec = JSON.parse(await readFile(join(first.run.runDir, "launch-refusal.json"), "utf8"));
+  assert.equal(rec.kind, "refused-launch");
+  assert.equal(rec.runId, first.run.runId);
 });
 
 test("resolveRun: valid staged launch-context passes through verbatim (tool-wrapper lane)", async (t) => {

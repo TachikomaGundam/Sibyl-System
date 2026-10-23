@@ -19,7 +19,8 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdirPrivate } from "./fsperm.ts";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { compactIso, isIndependenceShape, type IndependenceRef } from "./state/record.ts";
@@ -142,20 +143,70 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     return { ok: false, error: `--run-id must be a bare sibyl run id, got "${flagRunId}"` };
   }
   const runId = flagRunId ?? `sibyl-${compactIso(now)}-${randomBytes(2).toString("hex")}`;
-  const runDir = join(laneCfg.runRoot, `sibyl-run-${runId}`);
-  await mkdir(runDir, { recursive: true });
+  // pre-flight target probe (order matters for receipts: an unreadable target is the
+  // caller's problem and must surface BEFORE any run-dir side effect — creation,
+  // refusal records — so failed launches leave no /tmp litter behind).
+  if (targetRaw !== "-") {
+    const abs = isAbsolute(targetRaw) ? targetRaw : resolve(process.cwd(), targetRaw);
+    try {
+      await access(abs);
+    } catch (e) {
+      return { ok: false, error: `--target unreadable: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
 
-  let launchIndependence: IndependenceRef;
+  const runDir = join(laneCfg.runRoot, `sibyl-run-${runId}`);
+  await mkdirPrivate(runDir);
+
+  // F-W1b option 3 (council run sibyl-20261023T102611Z-16a2, owner-approved 2026-10-23):
+  // an explicit --run-id declares a TOOL-launched review; if the tool never staged its
+  // launch-context (or staged garbage), refusing is honest. Headless callers keep the
+  // bare path (no --run-id), where the leg is NAMED UNVERIFIABLE by design — the flip
+  // would otherwise manufacture a W2-banned absence-without-record at the service face.
+  // A refusal still records itself: launch-refusal.json inside the private run dir.
+  let contextLeg: Record<string, unknown> | null = null;
+  let contextProblem: string | null = null;
   try {
     const lc = JSON.parse(await readFile(join(runDir, "launch-context.json"), "utf8")) as Record<string, unknown>;
-    launchIndependence = isIndependenceShape(lc["independence"])
-      ? lc["independence"]
-      : {
-          status: "UNVERIFIABLE",
-          convenerChain: [],
-          evidence: "launch-context staged but its independence leg is malformed — not trusted; this review carries no independence anchor",
+    if (isIndependenceShape(lc["independence"])) contextLeg = lc;
+    else contextProblem = "launch-context staged but its independence leg is malformed";
+  } catch (err) {
+    contextProblem =
+      err instanceof Error && err.name === "SyntaxError"
+        ? "launch-context exists but is not valid JSON"
+        : "no launch-context staged in the run dir";
+  }
+  if (flagRunId !== null && contextProblem !== null) {
+    const refusal = {
+      kind: "refused-launch",
+      runId: flagRunId,
+      reason:
+        `${contextProblem} — a --run-id launch claims a tool-staged review that never happened; ` +
+        "rerun through the sibyl_review tool, or drop --run-id for the supported bare headless launch",
+      at: now.toISOString(),
+    };
+    await writeFile(join(runDir, "launch-refusal.json"), `${JSON.stringify(refusal, null, 2)}\n`, "utf8");
+    return { ok: false, error: refusal.reason };
+  }
+
+  let launchIndependence: IndependenceRef;
+  if (contextLeg !== null) {
+    launchIndependence = contextLeg["independence"] as IndependenceRef;
+    // self-report guard (same run 16a2): the run record the chamber runner regenerates is
+    // the tool's OWN face; a staged context cannot outvouch it once the face exists.
+    try {
+      const face = JSON.parse(await readFile(join(runDir, "run-record.json"), "utf8")) as Record<string, unknown>;
+      const faceInd = face["independence"];
+      if (isIndependenceShape(faceInd) && faceInd.status !== launchIndependence.status) {
+        launchIndependence = {
+          ...faceInd,
+          evidence: `context claimed ${launchIndependence.status}, run record carries ${faceInd.status} — record wins. ${faceInd.evidence}`,
         };
-  } catch {
+      }
+    } catch {
+      /* face not written yet: the staged context is the only face, kept as staged */
+    }
+  } else {
     // bare CLI launch: no wrapper resolved a convener. Absence of the field was
     // the old silent hole; the field must be present and NAMED (W1 header rule:
     // missing-field-is-violation, digest §three.2).

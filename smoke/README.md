@@ -3,7 +3,7 @@
 ## Offline smoke (default, deterministic)
 
 No live LLM, no network, no config writes. Proves the shipped surface:
-bundle imports → factory disabled-on-bad-options → three `sibyl_*` tools
+bundle imports → factory disabled-on-bad-options → eight `sibyl_*` tools
 registered → `sibyl_status` reads an isolated empty store → no residue.
 
 ```bash
