@@ -5,7 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
-## [1.5.0] - 2026-10-24
+## [1.5.1] - 2026-10-28
+
+### Fixed
+- **Security chain (GHSA-mrhx-c7xc-m3w5).** zod `<4.6.6` (high: memory exhaustion on
+  oversized constrained collections) was published into both dependency chains — the
+  direct `zod` and the nested `zod` under `@opencode-ai/plugin` — *between* the v1.5.0
+  wheel build (audit green that day) and its push days later. The standing
+  `npm audit --audit-level=high` door (introduced v1.4.0) failed the publish job and
+  the tag-push CI: **nothing of 1.5.0 was ever served** — registry still had no 1.5.0
+  at gate time (verified by receipt, see 1.5.0 note). Fix follows the v1.4.0 toml
+  precedent: direct `zod` to `^4.6.7`, nested plugin zod forced by scoped `overrides`
+  (the plugin's own fix range offers only a breaking downgrade). Offline suite,
+  build, smoke, coverage green on the override; `npm audit` clean.
+
+## [1.5.0] - 2026-10-24 — tag minted 2026-10-24, pushed 2026-10-28; NEVER PUBLISHED
+
+The annotated tag `v1.5.0` exists (audited release face), but its publish workflow was
+**blocked by the audit door** when the zod advisory landed in the interim window. The
+semver face below shipped in 1.5.1 (identical content plus the zod fix); the tag is
+honestly kept in place — no history rewrite.
 
 ### Added
 - **SSRF egress gate on `sibyl_time_probe`** (`classifyEgress`): caller URLs are refused by rule name before any fetch — non-http(s) schemes, userinfo, non-default ports, IPv4/IPv6 reserved families (loopback, private, link-local incl. cloud-metadata `169.254.0.0/16`, CGNAT, multicast/reserved, ULA, and mapped/compat/6to4 addresses whose embedded IPv4 is re-checked), single-label hosts and internal name suffixes. Blocked sources become `blocked-egress` failed receipts — blocked is never consent; all-blocked yields `INSUFFICIENT-SOURCES` with zero fetches.
