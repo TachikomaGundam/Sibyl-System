@@ -42,7 +42,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "esbuild": "^0.25.0",
-    "typescript": "^5"
+    "typescript": "^7"
   },
   "bin": {
     "sibyl-chamber": "./dist/cli.js"
