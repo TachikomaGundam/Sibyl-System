@@ -403,9 +403,9 @@ npm. Enforcement comes in two honest layers:
 - **Server-side (the door):** the CI publish workflow independently repeats
   the tag-paperwork checks and additionally refuses unless a fresh
   security-audit run — scheduled or dispatched by the repo itself — finished
-  green on the exact commit being released (its age window and commit-binding
-  are described under "Supply chain" in Security notes). Skipping the local
-  hook does not skip this. The npm publish itself runs under a CI identity
+  green on the exact commit being released (the commit binding is the
+  "Supply chain" bullet in Security notes). Skipping the local hook does not
+  skip this. The npm publish itself runs under a CI identity
   with provenance, so the registry records exactly which repo commit
   produced the package.
 - All of it is regression-locked in tests (`test/hook-prepush.test.ts` feeds
