@@ -276,8 +276,11 @@ Summary:
 - Voter/worker turns run with `bash`, `edit`, and `write` disabled per prompt.
 - Supply chain: CI actions are SHA-pinned, installs run with
   `--ignore-scripts`, and a weekly scheduled `npm audit` is witnessed
-  server-side by the pre-publish liveness gate (a fresh green audit run bound
-  to the exact commit being released). Honest status ledger of every vector,
+  server-side by the pre-publish liveness gate (a green audit run, recent
+  within the gate's pinned freshness window and bound to the exact commit
+  being released — the window's exact numbers and the full judgment table are
+  pinned in `test/publish-gate.test.ts`, the single source). Honest status
+  ledger of every vector,
   open or closed: [OPEN-VECTORS.md](OPEN-VECTORS.md).
 - Engine sessions this product spawns are retained under bounded ages
   (`npm run reap`, dry-run by default; audit conveners >= 90 days per owner
