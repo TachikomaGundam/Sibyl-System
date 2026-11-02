@@ -278,8 +278,10 @@ Summary:
   `--ignore-scripts`, and a weekly scheduled `npm audit` is witnessed
   server-side by the pre-publish liveness gate (a green audit run, recent
   within the gate's pinned freshness window and bound to the exact commit
-  being released — the window's exact numbers and the full judgment table are
-  pinned in `test/publish-gate.test.ts`, the single source). Honest status
+  being released — the judgment table is locked in
+  `test/publish-gate.test.ts` and the operative defaults live in
+  `scripts/publish-gate.mjs`; the two are changed together in one commit).
+  Honest status
   ledger of every vector,
   open or closed: [OPEN-VECTORS.md](OPEN-VECTORS.md).
 - Engine sessions this product spawns are retained under bounded ages
@@ -364,8 +366,11 @@ Live end-to-end evidence (real opencode, real model sessions):
   planted defect classes; council wall time 95.6 s ≈ slowest single voter
   (Σ 168.2 s), proving true parallel fan-out.
 - `.omo/evidence/t11/` (internal working evidence, not shipped) — failure paths, 31/31 assertions: a bad model slot
-  produced 3 error votes → fail-closed **REJECT 0A/0R/3E**; SIGINT mid-run left
+  produced 3 error votes, and the run failed closed; SIGINT mid-run left
   the store valid with the interrupted run honestly frozen at `running`.
+  (The recorded tally predates the judgment-table law pinned in
+  `test/council.test.ts`; under today's locked table an all-error ballot is
+  classified CANNOT_ANSWER, never REJECT — see the fail-closed policy table.)
 - `smoke/` ships a deterministic offline re-check of the build + entry +
   status surface for CI use.
 
@@ -407,13 +412,16 @@ npm. Enforcement comes in two honest layers:
   Hooks are per-clone and must be installed (`scripts/install-hooks.sh`), and
   `git push --no-verify` can skip them — they save you a rejected push, they
   are not the door.
-- **Server-side (the door):** the CI publish workflow independently repeats
-  the tag-paperwork checks and additionally refuses unless a recent
+- **Server-side (the door):** the CI publish workflow re-runs the tag
+  paperwork — tag name must equal `package.json`'s version, and the release
+  record `docs/release/<version>.md` must exist in the tagged tree carrying a
+  literal `gate: PASS` line (`scripts/tag-paperwork.mjs`, locked by
+  `test/tag-paperwork.test.ts`) — and additionally refuses unless a recent
   security-audit run — scheduled or dispatched by the repo itself — finished
   green on the exact commit being released (the commit binding and the
   pinned freshness window are the "Supply chain" bullet in Security notes).
-  Skipping the local hook does not
-  skip this. The npm publish itself runs under a CI identity
+  Skipping the local hook does not skip this; only the tag-message hygiene
+  scan stays local-only. The npm publish itself runs under a CI identity
   with provenance, so the registry records exactly which repo commit
   produced the package.
 - All of it is regression-locked in tests (`test/hook-prepush.test.ts` feeds
