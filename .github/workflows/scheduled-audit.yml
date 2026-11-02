@@ -1,0 +1,31 @@
+name: scheduled-audit
+
+# Supply-chain window door (v1.6.0 seating, ruling fe01 item 2). Weekly npm
+# audit on main. This workflow's LATEST run is the release witness: the
+# publish gate (scripts/publish-gate.mjs) fails unless this file's newest
+# scheduled run is green, bound to the released commit (S1), and younger than
+# min(1.5x interval, 14d cap) (S2 - cap constant lives in the gate script).
+# NOTE: GitHub silently disables schedules on repos inactive 60 days - the
+# publish gate's staleness check is the detector; a dead cron shows up as a
+# blocked publish, never as a silent pass.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"   # Mondays 04:17 UTC
+  workflow_dispatch:        # manual trigger to widen the witness after a fix
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (I3): updating = dependabot PR changing the SHA, never a floating tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high

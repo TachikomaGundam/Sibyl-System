@@ -1,0 +1,16 @@
+# OPEN-VECTORS — supply-chain vectors, honest status ledger (public face)
+
+Rule (ruling fe01 fix 7): every mitigation that is NOT yet live keeps its
+vector recorded as OPEN with a due wheel; the release packet must transcribe
+this file's states; nothing here may silently read as "protected".
+
+| # | Vector | Mitigation | Status | Due / evidence |
+|---|--------|-----------|--------|----------------|
+| V1 | Third-party Action code swaps under a floating version tag (same commit, changed upstream code) | all `uses:` pinned to 40-char commit SHAs; updates only via reviewed dependabot commits | **CLOSED** | v1.6.0 (this wheel); SHAs verified upstream via git ls-remote 2026-11-02 |
+| V2 | Dependency install scripts executing during CI (payload class of the malicious-postinstall family) | `npm ci --ignore-scripts` in ci/publish/audit workflows; zero exemptions needed (esbuild 0.28.2 verified script-free install, full doors green 2026-11-02); any future exemption must be NAMED here with reason | **CLOSED** | v1.6.0; test receipt in wheel evidence |
+| V3 | Advisory published in the build-to-push window (the class that blocked v1.5.0) | weekly scheduled npm audit + pre-publish server-side liveness gate (S1 head-binding, S2 min(1.5x interval, 14d cap constant in gate script)) | **CLOSED for the automated leg** | v1.6.0; residual: window between schedules remains by design — stated, not hidden |
+| V4 | Silent removal/neutralization of the gates themselves (workflow edit deleting the audit/liveness steps) | EXTERNAL anchors only: (a) branch protection + required status checks — owner-side setting, seat verifies per wheel via `gh api .../branches/main/protection`; (b) border cross-repo content-hash rule — CR-BORDER-202610 item 6 | **OPEN** | (a) owner action pending, due before next release wheel — until then NO claim of protection; (b) awaiting border department, tracked in CR |
+| V5 | Tampered payloads inside already-audited tarballs (what lockfile/manifest scans structurally cannot see) | out of scope for text-level gates; named mechanism if ever needed: provenance/attestation verification at install | **OPEN (accepted, bounded)** | reviewed and accepted by ruling fe01; V2 shrinks the blast radius |
+
+Wheel law: each release packet copies this table verbatim; a CLOSED claim
+without its cited receipt demotes the row back to OPEN.
