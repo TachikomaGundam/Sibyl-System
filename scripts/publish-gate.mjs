@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// publish-gate: the pre-publish supply-chain door (v1.60 seating, rulings S1/S2).
+// publish-gate: the pre-publish supply-chain door (v1.6.0 seating, rulings S1/S2).
 //
 // FAILS the publish unless the LATEST scheduled audit workflow run is
 //   (a) completed SUCCESSFUL,
