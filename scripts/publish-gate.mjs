@@ -24,8 +24,14 @@ export function evaluate(runs, headSha, nowMs, opts) {
   // tip equals the release commit. head_branch=="main" is the branch binding.
   const sched = runs.filter((r) => (r.event === "schedule" || r.event === "workflow_dispatch") && r.head_branch === (opts.defaultBranch ?? "main"));
   if (sched.length === 0) return fail("no default-branch audit witness has EVER completed (schedule or dispatch) — the door has no history");
+  // 2b4a follow-up: the tripwire is SOME across the whole fetched window, not
+  // the newest foreign row only — a poison run deliberately buried behind a
+  // failed probe must not slip past the position-based check. Completed-and-
+  // failed foreign runs are tolerated (a neutered workflow that died proves
+  // nothing); any still-running or green foreign witness run refuses.
   const foreign = runs.filter((r) => (r.event === "schedule" || r.event === "workflow_dispatch") && r.head_branch !== (opts.defaultBranch ?? "main"));
-  if (foreign.length > 0 && (foreign[0].status !== "completed" || foreign[0].conclusion === "success")) return fail(`witness run(s) on non-default branch(es) [${foreign.map((r) => r.head_branch).join(",")}] exist — dispatch off-branch is a forgery posture, refusing`);
+  const poison = foreign.filter((r) => r.status !== "completed" || r.conclusion === "success");
+  if (poison.length > 0) return fail(`witness run(s) on non-default branch(es) [${poison.map((r) => `${r.head_branch}#${r.id}:${r.status}/${r.conclusion}`).join(",")}] — dispatch off-branch is a forgery posture, refusing`);
   const latest = sched[0]; // API returns newest first
   if (latest.status !== "completed") return fail(`latest scheduled run ${latest.id} status=${latest.status} (not completed) — waiting is capped, a hung audit blocks publish by design`);
   if (latest.conclusion !== "success") return fail(`latest scheduled run ${latest.id} conclusion=${latest.conclusion} — a red audit means unresolved advisories: fix or override via a named owner commit, never by shipping past it`);
@@ -66,16 +72,26 @@ async function main() {
   const intervalDays = num(args["interval-days"], 7, "interval-days");
   const capDays = num(args["cap-days"], 14, "cap-days"); // accepted window = min(1.5x interval, capDays, 14d ceiling in evaluator)
   if (!repo || !token || !head) { console.error("publish-gate refused: GH_REPO/GH_TOKEN/HEAD_SHA env required"); process.exit(1); }
-  const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=10`;
-  const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) {
-    let hint = "";
-    try { const b = await res.json(); hint = ` [github: ${String(b.message).slice(0, 80)}${b.resource ? ` resource=${b.resource}` : ""}]`; } catch { /* body unreadable — status alone still refuses */ }
-    console.error(`publish-gate refused: API ${res.status}${hint} (fail-closed — cannot verify, cannot publish)`);
-    process.exit(1);
+  // Pagination (2b4a follow-up): one 10-row page lets an attacker flood the
+  // newest rows with failed foreign probes to push the poison row off-screen.
+  // Walk up to 5 pages (50 rows) or until a short page; any API error on any
+  // page is fail-closed refusal, same as page 1.
+  const allRuns = [];
+  for (let page = 1; page <= 5; page++) {
+    const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=10&page=${page}`;
+    const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) {
+      let hint = "";
+      try { const b = await res.json(); hint = ` [github: ${String(b.message).slice(0, 80)}${b.resource ? ` resource=${b.resource}` : ""}]`; } catch { /* body unreadable — status alone still refuses */ }
+      console.error(`publish-gate refused: API ${res.status} (page ${page})${hint} (fail-closed — cannot verify, cannot publish)`);
+      process.exit(1);
+    }
+    const body = await res.json();
+    const batch = body.workflow_runs ?? [];
+    allRuns.push(...batch);
+    if (batch.length < 10) break;
   }
-  const body = await res.json();
-  const r = evaluate(body.workflow_runs ?? [], head, Date.now(), { intervalDays, capDays });
+  const r = evaluate(allRuns, head, Date.now(), { intervalDays, capDays });
   console.log(`publish-gate: ${r.verdict} — ${r.why}`);
   process.exit(r.verdict === "PASS" ? 0 : 1);
 }
