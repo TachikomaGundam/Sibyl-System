@@ -275,14 +275,14 @@ Summary:
   role homes, transcripts, pidfiles, CHECKSUMS.
 - Voter/worker turns run with `bash`, `edit`, and `write` disabled per prompt.
 - Supply chain: CI actions are SHA-pinned, installs run with
-  `--ignore-scripts`, and a weekly scheduled `npm audit` is witnessed
-  server-side by the pre-publish liveness gate (a green audit run, recent
-  within the gate's pinned freshness window and bound to the exact commit
-  being released — the judgment table is locked in
-  `test/publish-gate.test.ts` and the operative defaults live in
-  `scripts/publish-gate.mjs`; the two are changed together in one commit).
-  Honest status
-  ledger of every vector,
+  `--ignore-scripts`, and a weekly `npm audit`
+  (`.github/workflows/scheduled-audit.yml`, which also accepts repo
+  workflow_dispatch runs) is witnessed server-side by the pre-publish
+  liveness gate (a green audit run, recent within the gate's pinned
+  freshness window and bound to the exact commit being released — the
+  judgment table and the operative defaults are locked together in
+  `test/publish-gate.test.ts`, which imports the defaults from
+  `scripts/publish-gate.mjs`). Honest status ledger of every vector,
   open or closed: [OPEN-VECTORS.md](OPEN-VECTORS.md).
 - Engine sessions this product spawns are retained under bounded ages
   (`npm run reap`, dry-run by default; audit conveners >= 90 days per owner
@@ -390,7 +390,7 @@ MIT
 
 Publishing a version takes three steps:
 
-1. write a release record (`docs/release/<ver>.md`) listing the verification
+1. write a release record (`docs/release/v<version>.md` — named after the tag, v included) listing the verification
    evidence, including a literal `gate: PASS` line;
 2. take the release lease (`scripts/release-lease.sh`) — a lock file in the
    releaser's own `~/.config/sibyl/` that stops the same maintainer from
@@ -414,14 +414,15 @@ npm. Enforcement comes in two honest layers:
   are not the door.
 - **Server-side (the door):** the CI publish workflow re-runs the tag
   paperwork — tag name must equal `package.json`'s version, and the release
-  record `docs/release/<version>.md` must exist in the tagged tree carrying a
+  record `docs/release/v<version>.md` (tag name, v included) must exist in the tagged tree carrying a
   literal `gate: PASS` line (`scripts/tag-paperwork.mjs`, locked by
   `test/tag-paperwork.test.ts`) — and additionally refuses unless a recent
   security-audit run — scheduled or dispatched by the repo itself — finished
   green on the exact commit being released (the commit binding and the
   pinned freshness window are the "Supply chain" bullet in Security notes).
-  Skipping the local hook does not skip this; only the tag-message hygiene
-  scan stays local-only. The npm publish itself runs under a CI identity
+  Skipping the local hook does not skip this; among the hook's
+  checks only the tag-message hygiene scan has no server echo (the lease
+  of step 2 is a separate per-user guard, as labeled there). The npm publish itself runs under a CI identity
   with provenance, so the registry records exactly which repo commit
   produced the package.
 - All of it is regression-locked in tests (`test/hook-prepush.test.ts` feeds
