@@ -15,6 +15,9 @@
 //   env: GH_REPO=owner/name, GH_TOKEN=${{ secrets.GITHUB_TOKEN }}, HEAD_SHA from context
 
 /** Pure evaluator — unit-tested in test/publish-gate.test.ts. */
+export const DEFAULT_WORKFLOW = "scheduled-audit.yml";
+export const DEFAULTS = { intervalDays: 7, capDays: 14 };
+
 export function evaluate(runs, headSha, nowMs, opts) {
   const { intervalDays, capDays } = opts;
   const fail = (why) => ({ verdict: "FAIL", why });
@@ -62,15 +65,15 @@ async function main() {
   const repo = process.env["GH_REPO"] ?? "";
   const token = process.env["GH_TOKEN"] ?? "";
   const head = process.env["HEAD_SHA"] ?? "";
-  const workflow = String(args.workflow ?? "scheduled-audit.yml");
+  const workflow = String(args.workflow ?? DEFAULT_WORKFLOW);
   const num = (v, dflt, name) => {
     if (v === undefined || v === true) return dflt;
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) { console.error(`publish-gate refused: --${name} must be a positive finite number (got ${String(v).slice(0, 20)})`); process.exit(1); }
     return n;
   };
-  const intervalDays = num(args["interval-days"], 7, "interval-days");
-  const capDays = num(args["cap-days"], 14, "cap-days"); // accepted window = min(1.5x interval, capDays, 14d ceiling in evaluator)
+  const intervalDays = num(args["interval-days"], DEFAULTS.intervalDays, "interval-days");
+  const capDays = num(args["cap-days"], DEFAULTS.capDays, "cap-days"); // accepted window = min(1.5x interval, capDays, 14d ceiling in evaluator)
   if (!repo || !token || !head) { console.error("publish-gate refused: GH_REPO/GH_TOKEN/HEAD_SHA env required"); process.exit(1); }
   // Pagination (2b4a follow-up): one 10-row page lets an attacker flood the
   // newest rows with failed foreign probes to push the poison row off-screen.
