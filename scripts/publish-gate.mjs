@@ -18,8 +18,10 @@
 export function evaluate(runs, headSha, nowMs, opts) {
   const { intervalDays, capDays } = opts;
   const fail = (why) => ({ verdict: "FAIL", why });
-  const sched = runs.filter((r) => r.event === "schedule");
-  if (sched.length === 0) return fail("no scheduled audit run has EVER completed — the door has no history");
+  // repo-owned triggers only (cron + manual dispatch on the default branch);
+  // S1 head-binding still binds the witness to the exact released commit.
+  const sched = runs.filter((r) => r.event === "schedule" || r.event === "workflow_dispatch");
+  if (sched.length === 0) return fail("no audit run has EVER completed (schedule or dispatch) — the door has no history");
   const latest = sched[0]; // API returns newest first
   if (latest.status !== "completed") return fail(`latest scheduled run ${latest.id} status=${latest.status} (not completed) — waiting is capped, a hung audit blocks publish by design`);
   if (latest.conclusion !== "success") return fail(`latest scheduled run ${latest.id} conclusion=${latest.conclusion} — a red audit means unresolved advisories: fix or override via a named owner commit, never by shipping past it`);
@@ -43,7 +45,7 @@ async function main() {
   const intervalDays = Number(args["interval-days"] ?? 7);
   const capDays = Number(args["cap-days"] ?? 14); // S2 absolute cap: constant lives HERE, not in the mutable cron
   if (!repo || !token || !head) { console.error("publish-gate refused: GH_REPO/GH_TOKEN/HEAD_SHA env required"); process.exit(1); }
-  const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?event=schedule&per_page=5`;
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=10`;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) { console.error(`publish-gate refused: API ${res.status} (fail-closed — cannot verify, cannot publish)`); process.exit(1); }
   const body = await res.json();

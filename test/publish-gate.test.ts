@@ -35,6 +35,12 @@ test("S1: green but bound to a different commit fails", () => {
   assert.match(r.why, /S1/);
 });
 
+test("repo-owned dispatch witness counts; foreign events (push/pull_request) never do", () => {
+  assert.equal(evaluate([run({ event: "workflow_dispatch" })], HEAD, NOW, OPTS).verdict, "PASS");
+  assert.equal(evaluate([run({ event: "push" })], HEAD, NOW, OPTS).verdict, "FAIL");
+  assert.equal(evaluate([run({ event: "pull_request", conclusion: "success" })], HEAD, NOW, OPTS).verdict, "FAIL");
+});
+
 test("S2 window: >1.5x cron age fails; boundary just inside passes", () => {
   assert.equal(evaluate([run({ created_at: hrs(7 * 24 * 1.5 + 2) })], HEAD, NOW, OPTS).verdict, "FAIL");
   assert.equal(evaluate([run({ created_at: hrs(7 * 24 * 1.5 - 2) })], HEAD, NOW, OPTS).verdict, "PASS");
