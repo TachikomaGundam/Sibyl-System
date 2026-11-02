@@ -170,7 +170,11 @@ fails the release if any vendor model id reappears on a shipped surface.
 
 ## State layout
 
-- **Chamber ledger**: `~/.sibyl/chamber-ledger.jsonl` — append-only, one JSON
+All persistent data lives under one directory, `~/.sibyl` (created on first
+use; on Windows `%USERPROFILE%\.sibyl`) — nothing else on your machine is
+written outside it and the /tmp run dirs named below.
+
+- **Chamber ledger**: `~/.sibyl/chamber-ledger.jsonl` — append-only history, one JSON
   record per line, serial-stamped at append; `sibyl_status` reads its tail.
 - **Runs file**: `~/.sibyl/runs.json` (Windows: `%USERPROFILE%\.sibyl\runs.json`) —
   one record per run (id, kind, status, verdict tally, operator notes), co-located
@@ -179,7 +183,8 @@ fails the release if any vendor model id reappears on a shipped surface.
   atomically (tmp + rename; the parent directory is created on demand).
 - **Per-run space**: `~/.sibyl/spaces/<runId>/` (Windows: `%USERPROFILE%\.sibyl\spaces`) — full voter replies
   (`MELCHIOR.md`, …) for consults, worker drafts (`<workerId>.draft.md`) for swarms.
-- **Test seam**: `SIBYL_STATE_FILE` env var overrides the runs-file path.
+- **Test/CI override**: the `SIBYL_STATE_FILE` env var points the runs file at a
+  custom path, so automated tests keep their records out of your real state.
 - `load()` never throws: a missing or corrupt file recovers to an empty list
   (with a stderr warning); malformed individual entries are dropped, not fatal.
 
@@ -188,12 +193,12 @@ fails the release if any vendor model id reappears on a shipped surface.
 Plainly stated:
 
 - Approval needs **≥ 2 of 3 approvals and zero error/missing votes**.
-- When the council genuinely spoke (all three ballots substantive, or ≥ 2
-  substantive rejects) and approval was not reached, the verdict is **REJECT**.
-- When error/missing seats leave no decision (2A + 1 error, 2A + 1 missing,
-  a tie with an error seat), the verdict is **CANNOT_ANSWER** — a wounded
-  instrument, NOT a substantive reject, and it can never approve. Repair the
-  infra and re-run (pinned by `test/council.test.ts`).
+- When all three voters returned real reviews but approval was not reached,
+  the verdict is **REJECT** — the council answered "no".
+- When crashes or missing replies make a decision impossible (e.g. 2 approve +
+  1 error), the verdict is **CANNOT_ANSWER** — the mechanism itself is broken.
+  That is NOT a "no", and it can never be treated as a "yes": repair the
+  broken part and run again (pinned by `test/council.test.ts`).
 - Error votes, missing votes, and malformed verdicts all count against approval.
 - A reply that still doesn't parse after its single repair shot becomes a
   0-confidence REJECT ballot with reason `verdict-unparseable: …`.
@@ -305,9 +310,11 @@ index.ts            plugin entry: parse options → share one RunStore + client
                     glue + shared helpers (model-slot chain, artifact reader)
 ```
 
-## vs. swarm
+## Relationship to other multi-agent tools
 
-This is **not** the oh-my-openagent swarm. It has no `team_*` tools, no
+If you have seen "swarm"-style toolkits (e.g. the one bundled with
+oh-my-openagent, which coordinates long-lived named agents through shared
+tools and a message bus), this is **not** one of those. It has no `team_*` tools, no
 cross-agent message bus, and no fleet-orchestration dependency of any kind — it
 is a clean-room implementation (~5K lines of product code, comments excluded)
 that happens to share the problem space. `sibyl_swarm` is a single tool call
@@ -349,15 +356,25 @@ developed under the name MAGI and renamed to Sibyl-System before its first relea
 
 MIT
 
-## Release wheel
+## Release process
 
-Tags `v*` require a packet receipt (`docs/release/<ver>.md` with a real
-`gate: PASS` line) and a lease; after cloning run `scripts/install-hooks.sh` —
-hooks are per-clone and ship empty. The tag hook (rule W4) reads the receipt
-and `package.json`'s version exclusively from the pushed tag's **object body**
-(`git show <oid>:<path>`); working-tree reads are forbidden — the tag must
-carry its own paperwork, and the in-tag version must equal the tag name.
-Annotated-tag message bodies are scanned on push: home-path and email shapes
-are refused by rule name (the message is public release content — anchor facts
-by hash or run-id, not machine paths). Regression-locked in
-`test/hook-prepush.test.ts` (ref lines fed via stdin).
+Releases are gated by local git hooks — enforced by tooling, not by trust.
+Publishing a version takes three steps:
+
+1. write a release record (`docs/release/<ver>.md`) listing the verification
+   evidence, including a literal `gate: PASS` line;
+2. take the release lease (`scripts/release-lease.sh`) — a lock preventing two
+   releases from being tagged at the same time;
+3. create the tag and push it.
+
+The push-time hook (rule W4) re-verifies all of it: it reads the release
+record and `package.json`'s version from the exact files the pushed tag
+itself points at (`git show <oid>:<path>`), never from your working copy —
+so a tag must carry its own proof, and the version inside the tag must equal
+the tag name. Tag message bodies are scanned on push: home-directory paths
+and email-address shapes are refused by rule name, because tag messages are
+public — reference facts by hash or run id instead. The hooks ship with the
+repo but do not activate by default: run `scripts/install-hooks.sh` after
+cloning (hooks are per-clone). Every rule above is pinned by tests in
+`test/hook-prepush.test.ts`, which feed the hook the same push information
+git sends it.
