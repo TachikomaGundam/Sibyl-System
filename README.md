@@ -179,7 +179,9 @@ default `/tmp`, defined under Options) — sealed per-run directories there.
   record per line, each run stamped with a per-run sequence number that
   increments with every appended run; `sibyl_status` reads its tail.
 - **Runs file**: `~/.sibyl/runs.json` (Windows: `%USERPROFILE%\.sibyl\runs.json`) —
-  one record per run (id, kind, status, verdict tally, operator notes), co-located
+  one record per run (id, kind, artifact, goal, status, verdict, timestamps,
+  plus notes the tool records at run milestones, shown by `sibyl-chamber status`),
+  co-located
   with `spaces/` under the one `~/.sibyl` state root, so npm upgrades (which ship a
   fresh, versioned package directory) never wipe your run history. Written
   atomically (tmp + rename; the parent directory is created on demand).
@@ -220,11 +222,13 @@ Plainly stated — every combination lands in exactly one state:
 
 ## Ballot-integrity laws
 
-Four rules born from real postmortems — each one exists because a named
-failure happened. Three of them govern the ballot itself (`W1`–`W3`, the
-short names used across the codebase and the docs); the fourth short name,
-`W4`, governs releases instead and is stated where it applies, in the Release
-process section at the end of this document.
+These rules exist because real failures happened while this product was in
+daily internal use (the incident records themselves live outside the shipped
+package). Four of them govern the ballot itself; three carry the short names
+`W1`–`W3` used across the codebase and the docs, while the fourth — refused
+launches leaving records — arose from a specific council ruling and carries
+no short name. A fifth rule, `W4`, governs releases instead and is stated
+where it applies, in the Release process section at the end of this document.
 
 - **Convener recusal (W1).** Every consult/swarm/review run resolves the
   convening execution chain through the engine's own session store
