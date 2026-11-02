@@ -5,6 +5,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [1.6.0] - 2026-11-02
+
+### Added
+- **Supply-chain seating** (owner-ratified council ruling fe01): weekly scheduled
+  `npm audit` workflow; pre-publish **server-side liveness gate** — publish fails
+  unless the latest scheduled audit run is green, bound to the exact released
+  commit (S1), and younger than min(1.5x interval, 14-day cap held in the gate
+  script, not the mutable cron) (S2).
+- **Actions SHA-pinned** to upstream commit SHAs (verified via git ls-remote);
+  floating-tag code swaps now require a reviewed commit to happen.
+- **`npm ci --ignore-scripts`** as standing CI posture — verified full doors green
+  script-free (esbuild 0.28.2 needs no install scripts): zero exemptions in force;
+  any future one must be named in OPEN-VECTORS.md.
+- **OPEN-VECTORS.md**: honest public ledger — every mitigation not yet live keeps
+  its vector OPEN with a due wheel; release packets must transcribe it.
+- **`npm run reap`**: bounded session retention (the L1 law only reclaimed headless
+  children; parented ones accumulated forever — measured 1573, root cause of the
+  2026-11 machine slowdown). Dry-run default, JSONL decision manifest, deletions
+  only via the engine's own API; audit conveners retained >= 90 days per owner
+  ruling with the reconciliation face preserved in the sealed manifest.
+
+### Changed
+- Audit receipt states the 90-day retention horizon (ruler face unchanged).
+- `scripts/db-vacuum.py` armed with a live-writer refusal guard, after a
+  full-scale rehearsal measured 9.33G->9.28G in 679s — recorded: the store is
+  real data, not free-page bloat; in-place VACUUM is not worth a window.
+
+### Evidence
+Suite 485 -> 493 (publish-gate S1/S2 semantics unit-locked 8 cases; reap
+classifier 5 cases). Open vectors V1/V2/V3 CLOSED with receipts; V4 (gate
+self-deletion anchors: branch protection = owner action due before next release;
+border cross-rule = CR-BORDER-202610 item 6) and V5 (tarball payloads, accepted
+bounded) recorded OPEN — no silent protection claims.
+
 ## [1.5.1] - 2026-10-28
 
 ### Fixed

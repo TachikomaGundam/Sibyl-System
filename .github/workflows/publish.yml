@@ -5,16 +5,27 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: read # the liveness gate reads the scheduled-audit run history
 jobs:
   npm-oidc:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # v1.6.0 seating: SHA-pinned actions (I3); no dependency install scripts (I4);
+      # server-side liveness gate (S1/S2) — publish refuses without a fresh green
+      # scheduled audit bound to THIS commit. Gate self-deletion is answered by
+      # EXTERNAL anchors (branch protection + border cross-rule), see OPEN-VECTORS.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      - name: supply-chain liveness gate (S1/S2)
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.sha }}
+        run: node scripts/publish-gate.mjs --workflow scheduled-audit.yml
       - run: npm install -g npm@latest
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: ./ship.sh
       - run: npm audit --audit-level=high
       - run: npm publish --provenance
