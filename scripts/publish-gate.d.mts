@@ -5,3 +5,6 @@ export function evaluate(
   nowMs: number,
   opts: { intervalDays: number; capDays: number; defaultBranch?: string },
 ): { verdict: "PASS" | "FAIL"; why: string };
+
+export const DEFAULT_WORKFLOW: string;
+export const DEFAULTS: { intervalDays: number; capDays: number };

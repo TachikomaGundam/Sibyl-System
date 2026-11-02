@@ -1,7 +1,7 @@
 // publish-gate judgment locks (S1/S2 semantics from ruling fe01).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluate, type GateRun } from "../scripts/publish-gate.mjs";
+import { evaluate, DEFAULTS, DEFAULT_WORKFLOW, type GateRun } from "../scripts/publish-gate.mjs";
 
 const NOW = Date.parse("2026-11-02T12:00:00Z");
 const HEAD = "a".repeat(40);
@@ -86,4 +86,9 @@ test("88e5: garbage --cap-days cannot NaN-widen the door (fail-closed)", () => {
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /must be a positive finite number/);
+});
+
+test("co-change lock (98f3 gate finding A): operative defaults cannot drift from the locked judgment table", () => {
+  assert.deepStrictEqual(DEFAULTS, OPTS);
+  assert.equal(DEFAULT_WORKFLOW, "scheduled-audit.yml");
 });
