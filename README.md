@@ -289,7 +289,7 @@ PLAN→MINT→DISPATCH→AGGREGATE pipeline over ordinary child sessions.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm test            # full unit suite, fully offline (no network, no LLM; 493 at v1.6.0 — the run prints the exact count)
+npm test            # full unit suite, fully offline (no network, no LLM; 496 at v1.6.0 — the run prints the exact count)
 npm run reap        # session-retention reaper: dry-run manifest by default; -- --apply deletes via the engine API
 npm run coverage    # offline suite + coverage floor ratchet (lines 55 / branches 80 / funcs 90 — floors only move up; CI door)
 npm run build       # esbuild bundle → dist/index.js + dist/cli.js (ESM)
