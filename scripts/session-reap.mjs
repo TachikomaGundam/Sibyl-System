@@ -34,15 +34,14 @@ const DAY = 86_400_000;
  * scope is deliberately narrow: ONLY titles the Sibyl product itself mints
  * ('sibyl:' prefix) are candidates; everything else is out of scope. */
 export function classify(sessions, opts) {
-  const { nowMs, tierADays, tierBDays = null, ownerRuling = false, protectedIds = new Set(), keepRe = null } = opts;
+  const { nowMs, tierADays, tierBDays = null, ownerRuling = false, keepRe = null } = opts;
   const actions = [];
   for (const s of sessions) {
     const title = s.title ?? "";
     const id = s.id ?? "";
     const ageDays = (nowMs - (s.updated ?? 0)) / DAY;
-    const keep = (action, reason) => actions.push({ id, title, action, reason, ageDays: Math.floor(ageDays) });
+    const keep = (action, reason) => actions.push({ id, title, action, reason, ageDays: Math.floor(ageDays), created: s.created ?? 0, parentNull: !s.parentID });
     if (!title.toLowerCase().startsWith("sibyl:")) continue; // out of scope, not listed
-    if (protectedIds.has(id)) { keep("keep", "run-store: run not terminal"); continue; }
     if (keepRe && keepRe.test(id)) { keep("keep", "--keep override"); continue; }
     if (title.toLowerCase().startsWith("sibyl:audit")) {
       if (tierBDays !== null && ownerRuling && ageDays > tierBDays) { keep("delete", `tier-B audit root > ${tierBDays}d (owner-ruling)`); continue; }
@@ -59,26 +58,14 @@ export function classify(sessions, opts) {
   return actions;
 }
 
-/** ids with a non-terminal run in the sibyl run store — those sessions stay. */
-export function openRunSessionIds(store) {
-  const ids = new Set();
-  for (const r of store?.runs ?? []) {
-    if (r.status !== "done" && r.status !== "failed" && r.status !== "sealed") {
-      for (const sid of r.sessionIDs ?? []) ids.add(sid);
-      if (r.auditorSessionID) ids.add(r.auditorSessionID);
-    }
-  }
-  return ids;
-}
-
 /** Full-store READ-ONLY enumeration (see header law). */
 export function enumerate(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     return db
-      .prepare("SELECT id, title, parent_id AS parentID, time_updated AS updated FROM session")
+      .prepare("SELECT id, title, parent_id AS parentID, time_created AS created, time_updated AS updated FROM session")
       .all()
-      .map((r) => ({ id: r.id, title: r.title ?? "", parentID: r.parentID ?? null, updated: r.updated ?? 0 }));
+      .map((r) => ({ id: r.id, title: r.title ?? "", parentID: r.parentID ?? null, created: r.created ?? 0, updated: r.updated ?? 0 }));
   } finally {
     db.close();
   }
@@ -100,19 +87,12 @@ async function main() {
   const manifest = join(manifestDir, "manifest.jsonl");
   const log = (o) => appendFileSync(manifest, JSON.stringify(o) + "\n");
 
-  let store = { runs: [] };
-  try {
-    const fs = await import("node:fs/promises");
-    store = JSON.parse(await fs.readFile(join(homedir(), ".sibyl", "runs.json"), "utf8"));
-  } catch { /* fresh store: no protection ids */ }
-
   const sessions = enumerate(dbPath);
   const actions = classify(sessions, {
     nowMs: Date.now(),
     tierADays: Number(args["tier-a-days"] ?? 7),
     tierBDays: args["tier-b-days"] !== undefined ? Number(args["tier-b-days"]) : null,
     ownerRuling: Boolean(args["owner-ruling"]),
-    protectedIds: openRunSessionIds(store),
     keepRe: args.keep ? new RegExp(String(args.keep)) : null,
   });
   const del = actions.filter((a) => a.action === "delete");
