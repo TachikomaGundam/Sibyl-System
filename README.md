@@ -409,7 +409,9 @@ npm. Enforcement comes in two honest layers:
   version inside the tag to equal the tag name. Tag messages are scanned too:
   home-directory paths and email-address shapes are refused by rule name,
   because tag messages are public — reference facts by hash or run id.
-  Hooks are per-clone and must be installed (`scripts/install-hooks.sh`), and
+  The hook also refuses a tag push unless the local release lease (step 2)
+  names exactly that version. Hooks are per-clone and must be installed
+  (`scripts/install-hooks.sh`), and
   `git push --no-verify` can skip them — they save you a rejected push, they
   are not the door.
 - **Server-side (the door):** the CI publish workflow re-runs the tag
@@ -420,9 +422,10 @@ npm. Enforcement comes in two honest layers:
   security-audit run — scheduled or dispatched by the repo itself — finished
   green on the exact commit being released (the commit binding and the
   pinned freshness window are the "Supply chain" bullet in Security notes).
-  Skipping the local hook does not skip this; among the hook's
-  checks only the tag-message hygiene scan has no server echo (the lease
-  of step 2 is a separate per-user guard, as labeled there). The npm publish itself runs under a CI identity
+  Skipping the local hook does not skip this; of the hook's four
+  checks, two have no server echo — the tag-message hygiene scan, and the
+  lease check, which cannot echo by design (the lease is an operator-local
+  per-user file, step 2). The npm publish itself runs under a CI identity
   with provenance, so the registry records exactly which repo commit
   produced the package.
 - All of it is regression-locked in tests (`test/hook-prepush.test.ts` feeds
