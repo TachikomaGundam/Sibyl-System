@@ -65,3 +65,14 @@ test("S2 absolute cap: widening the cron cannot widen past the cap", () => {
 test("future-dated run is refused (clock games fail closed)", () => {
   assert.equal(evaluate([run({ created_at: hrs(-5) })], HEAD, NOW, OPTS).verdict, "FAIL");
 });
+
+// 88e5 lock: malformed args fail closed instead of NaN-widening the window
+import { spawnSync } from "node:child_process";
+test("88e5: garbage --cap-days cannot NaN-widen the door (fail-closed)", () => {
+  const r = spawnSync(process.execPath, ["--no-warnings", "scripts/publish-gate.mjs", "--cap-days=14x"], {
+    encoding: "utf8", cwd: new URL("..", import.meta.url).pathname,
+    env: { ...process.env, GH_REPO: "x/y", GH_TOKEN: "t", HEAD_SHA: "h" },
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /must be a positive finite number/);
+});

@@ -57,8 +57,14 @@ async function main() {
   const token = process.env["GH_TOKEN"] ?? "";
   const head = process.env["HEAD_SHA"] ?? "";
   const workflow = String(args.workflow ?? "scheduled-audit.yml");
-  const intervalDays = Number(args["interval-days"] ?? 7);
-  const capDays = Number(args["cap-days"] ?? 14); // accepted window = min(1.5x interval, capDays, 14d ceiling in evaluator)
+  const num = (v, dflt, name) => {
+    if (v === undefined || v === true) return dflt;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) { console.error(`publish-gate refused: --${name} must be a positive finite number (got ${String(v).slice(0, 20)})`); process.exit(1); }
+    return n;
+  };
+  const intervalDays = num(args["interval-days"], 7, "interval-days");
+  const capDays = num(args["cap-days"], 14, "cap-days"); // accepted window = min(1.5x interval, capDays, 14d ceiling in evaluator)
   if (!repo || !token || !head) { console.error("publish-gate refused: GH_REPO/GH_TOKEN/HEAD_SHA env required"); process.exit(1); }
   const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=10`;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(15_000) });
