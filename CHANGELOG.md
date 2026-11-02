@@ -7,6 +7,13 @@ Authoritative per-release detail lives in the release packets under `docs/releas
 
 ## [1.6.1] - 2026-11-03
 
+### Added
+- **Server-side tag paperwork** (`scripts/tag-paperwork.mjs`, new workflow step
+  in publish): tag name must equal `package.json`'s version and
+  `docs/release/<version>.md` must carry a literal `gate: PASS` line — the
+  receipt/parity law now re-runs server-side, where `--no-verify` cannot
+  reach (blind-audit 98f3 blocker; 8 lock tests).
+
 ### Fixed
 - **Publish-gate tripwire is now window-wide**: a poison witness on a foreign
   branch buried behind failed probes no longer slips past the position-based
