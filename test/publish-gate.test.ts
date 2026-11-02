@@ -6,7 +6,7 @@ import { evaluate, type GateRun } from "../scripts/publish-gate.mjs";
 const NOW = Date.parse("2026-11-02T12:00:00Z");
 const HEAD = "a".repeat(40);
 const hrs = (n: number) => new Date(NOW - n * 3_600_000).toISOString();
-const run = (o: Partial<GateRun>): GateRun => ({ id: 1, event: "schedule", status: "completed", conclusion: "success", head_sha: HEAD, created_at: hrs(10), ...o });
+const run = (o: Partial<GateRun>): GateRun => ({ id: 1, event: "schedule", status: "completed", conclusion: "success", head_sha: HEAD, head_branch: "main", created_at: hrs(10), ...o });
 const OPTS = { intervalDays: 7, capDays: 14 };
 
 test("happy: latest scheduled run green, on HEAD, fresh", () => {
@@ -39,6 +39,15 @@ test("repo-owned dispatch witness counts; foreign events (push/pull_request) nev
   assert.equal(evaluate([run({ event: "workflow_dispatch" })], HEAD, NOW, OPTS).verdict, "PASS");
   assert.equal(evaluate([run({ event: "push" })], HEAD, NOW, OPTS).verdict, "FAIL");
   assert.equal(evaluate([run({ event: "pull_request", conclusion: "success" })], HEAD, NOW, OPTS).verdict, "FAIL");
+});
+
+test("6935 forgery locks: off-branch witnesses never count; their very existence with a green result refuses", () => {
+  assert.equal(evaluate([run({ head_branch: "evil-branch" })], HEAD, NOW, OPTS).verdict, "FAIL");
+  assert.equal(evaluate([run({ head_branch: "main" }), run({ id: 9, head_branch: "evil", conclusion: "success" })], HEAD, NOW, OPTS).verdict, "FAIL");
+});
+
+test("6935 clamp: caller args can never widen past the 14d ceiling", () => {
+  assert.equal(evaluate([run({ created_at: hrs(15 * 24) })], HEAD, NOW, { intervalDays: 60, capDays: 9999 }).verdict, "FAIL");
 });
 
 test("S2 window: >1.5x cron age fails; boundary just inside passes", () => {
