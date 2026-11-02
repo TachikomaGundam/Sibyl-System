@@ -22,7 +22,7 @@ jobs:
       # runner-bundled npm 10.x cannot (the ENEEDAUTH lesson of tag b96369e,
       # 2026-11-02). Pinned exact: updates happen only via reviewed commits
       # (this file is gate-territory; dependabot does not float this constant).
-      - run: npm install -g npm@11.21.1
+      - run: npm install -g --ignore-scripts npm@11.21.1
       - name: supply-chain liveness gate (S1/S2)
         env:
           GH_REPO: ${{ github.repository }}
