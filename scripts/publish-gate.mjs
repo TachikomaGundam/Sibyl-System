@@ -37,10 +37,20 @@ export function evaluate(runs, headSha, nowMs, opts) {
   return { verdict: "PASS", why: `latest scheduled audit run ${latest.id} green on ${String(latest.head_sha).slice(0, 12)} age ${Math.floor(ageMs / 3_600_000)}h` };
 }
 
-const args = Object.fromEntries(process.argv.slice(2).map((a) => {
-  const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
-  return m ? [m[1], m[2] ?? true] : [a, true];
-}));
+const args = (() => {
+  const out = {};
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i += 1) {
+    const eq = /^--([^=]+)=(.*)$/.exec(argv[i]);
+    if (eq) { out[eq[1]] = eq[2]; continue; }
+    const bare = /^--([^=]+)$/.exec(argv[i]);
+    if (!bare) continue;
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith("--")) { out[bare[1]] = next; i += 1; }
+    else out[bare[1]] = true;
+  }
+  return out;
+})();
 
 async function main() {
   const repo = process.env["GH_REPO"] ?? "";
@@ -52,7 +62,12 @@ async function main() {
   if (!repo || !token || !head) { console.error("publish-gate refused: GH_REPO/GH_TOKEN/HEAD_SHA env required"); process.exit(1); }
   const url = `https://api.github.com/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?per_page=10`;
   const res = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) { console.error(`publish-gate refused: API ${res.status} (fail-closed — cannot verify, cannot publish)`); process.exit(1); }
+  if (!res.ok) {
+    let hint = "";
+    try { const b = await res.json(); hint = ` [github: ${String(b.message).slice(0, 80)}${b.resource ? ` resource=${b.resource}` : ""}]`; } catch { /* body unreadable — status alone still refuses */ }
+    console.error(`publish-gate refused: API ${res.status}${hint} (fail-closed — cannot verify, cannot publish)`);
+    process.exit(1);
+  }
   const body = await res.json();
   const r = evaluate(body.workflow_runs ?? [], head, Date.now(), { intervalDays, capDays });
   console.log(`publish-gate: ${r.verdict} — ${r.why}`);
