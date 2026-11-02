@@ -46,6 +46,17 @@ test("6935 forgery locks: off-branch witnesses never count; their very existence
   assert.equal(evaluate([run({ head_branch: "main" }), run({ id: 9, head_branch: "evil", conclusion: "success" })], HEAD, NOW, OPTS).verdict, "FAIL");
 });
 
+test("2b4a follow-up: tripwire is SOME across the window — poison buried behind failed probes still refuses", () => {
+  const ok = run({ id: 100 }); // fresh green main witness at the head
+  const deadProbe = run({ id: 101, head_branch: "evil-a", conclusion: "failure", created_at: hrs(1) });
+  const buriedPoison = run({ id: 102, head_branch: "evil-b", conclusion: "success", created_at: hrs(2) });
+  assert.equal(evaluate([ok, deadProbe, buriedPoison], HEAD, NOW, OPTS).verdict, "FAIL");
+  const stillRunning = run({ id: 103, head_branch: "evil-c", status: "in_progress", conclusion: null, created_at: hrs(2) });
+  assert.equal(evaluate([ok, deadProbe, stillRunning], HEAD, NOW, OPTS).verdict, "FAIL");
+  // completed-and-failed foreign probes alone are tolerated (they prove nothing)
+  assert.equal(evaluate([ok, deadProbe, run({ id: 104, head_branch: "evil-d", conclusion: "failure", created_at: hrs(3) })], HEAD, NOW, OPTS).verdict, "PASS");
+});
+
 test("6935 clamp: caller args can never widen past the 14d ceiling", () => {
   assert.equal(evaluate([run({ created_at: hrs(15 * 24) })], HEAD, NOW, { intervalDays: 60, capDays: 9999 }).verdict, "FAIL");
 });
