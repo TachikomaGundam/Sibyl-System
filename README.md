@@ -408,10 +408,11 @@ npm. Enforcement comes in two honest layers:
   `git push --no-verify` can skip them — they save you a rejected push, they
   are not the door.
 - **Server-side (the door):** the CI publish workflow independently repeats
-  the tag-paperwork checks and additionally refuses unless a fresh
+  the tag-paperwork checks and additionally refuses unless a recent
   security-audit run — scheduled or dispatched by the repo itself — finished
-  green on the exact commit being released (the commit binding is the
-  "Supply chain" bullet in Security notes). Skipping the local hook does not
+  green on the exact commit being released (the commit binding and the
+  pinned freshness window are the "Supply chain" bullet in Security notes).
+  Skipping the local hook does not
   skip this. The npm publish itself runs under a CI identity
   with provenance, so the registry records exactly which repo commit
   produced the package.
