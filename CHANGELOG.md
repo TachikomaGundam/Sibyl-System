@@ -5,6 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [1.6.1] - 2026-11-03
+
+### Fixed
+- **Publish-gate tripwire is now window-wide**: a poison witness on a foreign
+  branch buried behind failed probes no longer slips past the position-based
+  check — refusal is a SOME over the fetched window, the CLI shell paginates
+  5x10, and any API error mid-pagination is fail-closed like page one.
+  Completed-and-failed foreign probes stay tolerated (they prove nothing).
+
+### Changed
+- **README rewritten for outside readers** (third-party review, grade C+):
+  a why-three-voters opener; internal rule codes demoted to parentheticals
+  defined at first use; institutional jargon replaced with plain language;
+  all version-history markers moved out of the body into this file.
+- **Corrected a documented falsehood**: the README previously claimed an
+  unparseable councilor reply becomes a 0-confidence REJECT ballot. The code
+  makes it an ERROR seat: not tallied, blocks approval, can force
+  CANNOT_ANSWER (`src/tools/consult.ts`). The fail-closed policy section now
+  states the real judgment table.
+
 ## [1.6.0] - 2026-11-02
 
 ### Added
