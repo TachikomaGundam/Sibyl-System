@@ -18,6 +18,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      # npm Trusted Publishing (OIDC, tokenless) REQUIRES npm >= 11.5.1 — the
+      # runner-bundled npm 10.x cannot (the ENEEDAUTH lesson of tag b96369e,
+      # 2026-11-02). Pinned exact: updates happen only via reviewed commits
+      # (this file is gate-territory; dependabot does not float this constant).
+      - run: npm install -g npm@11.21.1
       - name: supply-chain liveness gate (S1/S2)
         env:
           GH_REPO: ${{ github.repository }}
