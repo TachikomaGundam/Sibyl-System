@@ -171,11 +171,13 @@ fails the release if any vendor model id reappears on a shipped surface.
 ## State layout
 
 All persistent data lives under one directory, `~/.sibyl` (created on first
-use; on Windows `%USERPROFILE%\.sibyl`) — nothing else on your machine is
-written outside it and the /tmp run dirs named below.
+use; on Windows `%USERPROFILE%\.sibyl`). The only place outside it the plugin
+writes is the isolated run root for chamber/exam lanes (`lane.runRoot`,
+default `/tmp`, defined under Options) — sealed per-run directories there.
 
 - **Chamber ledger**: `~/.sibyl/chamber-ledger.jsonl` — append-only history, one JSON
-  record per line, serial-stamped at append; `sibyl_status` reads its tail.
+  record per line, each run stamped with a per-run sequence number that
+  increments with every appended run; `sibyl_status` reads its tail.
 - **Runs file**: `~/.sibyl/runs.json` (Windows: `%USERPROFILE%\.sibyl\runs.json`) —
   one record per run (id, kind, status, verdict tally, operator notes), co-located
   with `spaces/` under the one `~/.sibyl` state root, so npm upgrades (which ship a
@@ -183,32 +185,46 @@ written outside it and the /tmp run dirs named below.
   atomically (tmp + rename; the parent directory is created on demand).
 - **Per-run space**: `~/.sibyl/spaces/<runId>/` (Windows: `%USERPROFILE%\.sibyl\spaces`) — full voter replies
   (`MELCHIOR.md`, …) for consults, worker drafts (`<workerId>.draft.md`) for swarms.
-- **Test/CI override**: the `SIBYL_STATE_FILE` env var points the runs file at a
-  custom path, so automated tests keep their records out of your real state.
-- `load()` never throws: a missing or corrupt file recovers to an empty list
-  (with a stderr warning); malformed individual entries are dropped, not fatal.
+- **Test/CI override**: the `SIBYL_STATE_FILE` env var points **the runs file**
+  at a custom path (its scope is exactly that file — the chamber ledger and
+  `spaces/` keep their real paths, since the ledger is the audit trail and is
+  deliberately not silently relocatable; CI runners get a fresh home dir
+  anyway).
+- `load()` never throws: a missing or corrupt runs file recovers to an empty
+  list (with a stderr warning) and the next write replaces the corrupt file —
+  so if run history matters, back up `~/.sibyl`; the chamber ledger is a
+  separate append-only file and is untouched by that recovery. Malformed
+  individual entries are dropped, not fatal.
 
 ## Fail-closed policy
 
-Plainly stated:
+Plainly stated — every combination lands in exactly one state:
 
-- Approval needs **≥ 2 of 3 approvals and zero error/missing votes**.
-- When all three voters returned real reviews but approval was not reached,
-  the verdict is **REJECT** — the council answered "no".
-- When crashes or missing replies make a decision impossible (e.g. 2 approve +
-  1 error), the verdict is **CANNOT_ANSWER** — the mechanism itself is broken.
-  That is NOT a "no", and it can never be treated as a "yes": repair the
-  broken part and run again (pinned by `test/council.test.ts`).
-- Error votes, missing votes, and malformed verdicts all count against approval.
-- A reply that still doesn't parse after its single repair shot becomes a
-  0-confidence REJECT ballot with reason `verdict-unparseable: …`.
-- There is no lenient mode, by design.
+- **APPROVE** needs ≥ 2 genuine approvals **and** zero error/missing votes.
+  With three voters that means exactly 3A or 2A+1R.
+- **REJECT** when the council answered: all three voted genuinely but approval
+  wasn't reached, or there are ≥ 2 genuine rejects regardless of the third
+  seat (2R+1error is still a REJECT — the "no" is already decisive).
+- **CANNOT_ANSWER** for every other mix (2A+1error, 1A+1R+1error, …): the
+  mechanism itself is broken. That is NOT a "no", and it can never be treated
+  as a "yes": repair the broken part and run again.
+- A reply that still doesn't parse after its single repair shot is **not** a
+  reject ballot — it marks that seat as an error, which blocks approval and
+  can force CANNOT_ANSWER. There is no path where a broken reply helps
+  anything pass.
+- Each ballot also carries a self-reported `confidence` (0..1): recorded for
+  the human reader, never used in the tally.
+- The pinned default policy is `majority2of3`; stricter policies exist (see
+  Architecture), never looser ones. There is no lenient mode, by design.
+  All of the above is pinned by `test/council.test.ts`.
 
 ## Ballot-integrity laws
 
 Four rules born from real postmortems — each one exists because a named
-failure happened. `W1`–`W4` are their internal short names, used across the
-codebase and the docs.
+failure happened. Three of them govern the ballot itself (`W1`–`W3`, the
+short names used across the codebase and the docs); the fourth short name,
+`W4`, governs releases instead and is stated where it applies, in the Release
+process section at the end of this document.
 
 - **Convener recusal (W1).** Every consult/swarm/review run resolves the
   convening execution chain through the engine's own session store
@@ -312,13 +328,15 @@ index.ts            plugin entry: parse options → share one RunStore + client
 
 ## Relationship to other multi-agent tools
 
-If you have seen "swarm"-style toolkits (e.g. the one bundled with
-oh-my-openagent, which coordinates long-lived named agents through shared
-tools and a message bus), this is **not** one of those. It has no `team_*` tools, no
-cross-agent message bus, and no fleet-orchestration dependency of any kind — it
-is a clean-room implementation (~5K lines of product code, comments excluded)
-that happens to share the problem space. `sibyl_swarm` is a single tool call
-driving a PLAN→MINT→DISPATCH→AGGREGATE pipeline over ordinary child sessions.
+If you have seen "swarm"-style toolkits — for example the multi-agent
+orchestration bundled with [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent),
+which coordinates long-lived named agents through shared tools and a message
+bus — this is **not** one of those. It has no `team_*` tools, no
+cross-agent message bus, and no fleet-orchestration dependency of any kind —
+it was written from scratch (~5K lines of product code, comments excluded,
+`src/` only) and happens to share the problem space. `sibyl_swarm` is a
+single tool call driving a PLAN→MINT→DISPATCH→AGGREGATE pipeline over
+ordinary child sessions.
 
 ## Development
 
@@ -358,23 +376,38 @@ MIT
 
 ## Release process
 
-Releases are gated by local git hooks — enforced by tooling, not by trust.
 Publishing a version takes three steps:
 
 1. write a release record (`docs/release/<ver>.md`) listing the verification
    evidence, including a literal `gate: PASS` line;
-2. take the release lease (`scripts/release-lease.sh`) — a lock preventing two
-   releases from being tagged at the same time;
+2. take the release lease (`scripts/release-lease.sh`) — a lock file in the
+   releaser's own `~/.config/sibyl/` that stops the same maintainer from
+   tagging two releases at once (it is a per-user guard, not a distributed
+   lock);
 3. create the tag and push it.
 
-The push-time hook (rule W4) re-verifies all of it: it reads the release
-record and `package.json`'s version from the exact files the pushed tag
-itself points at (`git show <oid>:<path>`), never from your working copy —
-so a tag must carry its own proof, and the version inside the tag must equal
-the tag name. Tag message bodies are scanned on push: home-directory paths
-and email-address shapes are refused by rule name, because tag messages are
-public — reference facts by hash or run id instead. The hooks ship with the
-repo but do not activate by default: run `scripts/install-hooks.sh` after
-cloning (hooks are per-clone). Every rule above is pinned by tests in
-`test/hook-prepush.test.ts`, which feed the hook the same push information
-git sends it.
+Nothing more is done by hand: pushing the tag is the last human step. A CI
+workflow triggered by the tag then re-verifies the paperwork and publishes to
+npm. Enforcement comes in two honest layers:
+
+- **Local (fast-fail, bypassable):** a push hook (rule `W4`) checks that the
+  tag carries its own proof — it reads the release record and
+  `package.json`'s version from the exact files the pushed tag itself points
+  at (`git show <oid>:<path>`), never from the working copy, and requires the
+  version inside the tag to equal the tag name. Tag messages are scanned too:
+  home-directory paths and email-address shapes are refused by rule name,
+  because tag messages are public — reference facts by hash or run id.
+  Hooks are per-clone and must be installed (`scripts/install-hooks.sh`), and
+  `git push --no-verify` can skip them — they save you a rejected push, they
+  are not the door.
+- **Server-side (the door):** the CI publish workflow independently repeats
+  the tag-paperwork checks and additionally refuses unless a fresh
+  security-audit run — scheduled or dispatched by the repo itself — finished
+  green on the exact commit being released (its age window and commit-binding
+  are described under "Supply chain" in Security notes). Skipping the local
+  hook does not skip this. The npm publish itself runs under a CI identity
+  with provenance, so the registry records exactly which repo commit
+  produced the package.
+- All of it is regression-locked in tests (`test/hook-prepush.test.ts` feeds
+  the hook the same push information git sends it; `test/publish-gate.test.ts`
+  locks the server-side door's judgment table).
