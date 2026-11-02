@@ -36,8 +36,9 @@ export function buildAuditTool(deps: ToolDeps) {
     description:
       "SIBYL independent audit lane: convenes the three-councilor consult from a FRESH engine-provisioned " +
       "root session (structurally non-kin to any drafting chain), so the ballot enters the effective path " +
-      "without the caller's identity touching it. Emits an audit receipt — auditor session id (retained, " +
-      "DB-reconcilable), artifact sha256 bound at start and end, verdict face. REFUSES (no receipt) if the " +
+      "without the caller's identity touching it. Emits an audit receipt — auditor session id (retained >=90 " +
+      "days, then reconcilable via the sealed reap manifests), artifact sha256 bound at start and end, verdict " +
+      "face. REFUSES (no receipt) if the " +
       "fresh convener resolves to anything but INDEPENDENT, or the artifact drifts mid-ballot (VOID).",
     args: {
       artifact: tool.schema.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
@@ -108,7 +109,7 @@ export async function auditExecute(
     [
       `SIBYL AUDIT RECEIPT run=${runId}`,
       `  verdict=${v?.verdict ?? "unknown"} (${counts}) rules=${rules}`,
-      `  auditor-convener=${auditor} (fresh engine-provisioned root; session row RETAINED for DB reconciliation)`,
+      `  auditor-convener=${auditor} (fresh engine-provisioned root; session row retained >=90 days, after which sealed reap manifests carry the reconciliation face)`,
       `  requested-by=${caller} — recorded as ledger data only; it neither convenes nor votes`,
       `  artifact-sha256=${shaStart} (re-hashed after the ballot, identical — the receipt binds to these bytes)`,
       "",
