@@ -66,6 +66,41 @@ function dead(): LaunchFacts {
 function timeout(): LaunchFacts {
   return { ok: false, rc: null, signal: "SIGKILL", timedOut: true };
 }
+function salvaged(): LaunchFacts {
+  return { ok: true, rc: 0, signal: null, timedOut: false, salvagedMs: 4_321 };
+}
+
+test("salvage disclosure reaches the chamber face: kept work converges AND the gap line lands in notes (judge b33e named gap; no prior chamber-level test)", async (t) => {
+  const { dir, cfgBase } = await fixture("salv");
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  let salvagedOnce = false;
+  const lane = stubLane(async (role, _msg, rel) => {
+    const content = DEFAULT_CONTENT(role, rel);
+    if (content !== null) {
+      const abs = join(dir, "run", rel);
+      await mkdir(join(abs, ".."), { recursive: true });
+      await writeFile(abs, content, "utf8");
+    }
+    if (role === "con" && !salvagedOnce) {
+      salvagedOnce = true;
+      return salvaged();
+    }
+    return ok();
+  });
+  const res = await runChamber({ ...cfgBase, lane });
+  assert.equal(res.terminal, "CONVERGED", "work completed within grace is KEPT — convergence proceeds");
+  assert.equal(res.gaps.length, 1);
+  assert.match(res.gaps[0] ?? "", /^con round 1 \(draft\): SALVAGED — completed 4321ms past its deadline within grace/);
+  assert.match(res.record.notes ?? "", /SALVAGED/, "the run record face carries the disclosure, not just the live gaps array");
+  // Design pinned as-shipped (owner-ratified patch rides the gap channel): ANY gap
+  // downgrades a converged verdict to NEEDS_HUMAN — incl. the SALVAGED disclosure.
+  // Whether the disclosure class should be exempt is an open semantic fork for the
+  // owner; this test locks current behavior, not the desired one.
+  const voice = buildVoice(res);
+  assert.equal(voice.conclusion, "NEEDS_HUMAN", "gap-channel demotion — current design");
+  assert.ok((voice.confidence ?? 1) <= 0.5, "demoted confidence capped at 0.5");
+  assert.match(voice.rationale.join(" "), /SALVAGED/, "the voice names why it demoted");
+});
 
 const JUDGE_CONVERGED = JSON.stringify({
   convergence: "CONVERGED",
