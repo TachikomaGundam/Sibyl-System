@@ -8,7 +8,7 @@
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
@@ -112,7 +112,25 @@ export async function reviewExecute(
       args.seed !== undefined && args.seed.length > 0 ? args.seed : randomBytes(8).toString("hex"),
       ...(args.maxRounds !== undefined ? ["--max-rounds", String(args.maxRounds)] : []),
     ];
-    const child = spawn(cmd.bin, spawnArgs, { cwd: runDir, detached: true, stdio: "ignore" });
+    // W6 (wound sibyl-20261102T133505Z-4393, dead-without-record): a detached
+    // runner on stdio:"ignore" could die at module load or config parse and
+    // leave ZERO trace. The runner's stdout/stderr now land in startup.log
+    // inside the run dir; if that file cannot be opened, fall back to ignore
+    // rather than refusing to launch.
+    let startupOut: number | undefined;
+    let startupErr: number | undefined;
+    try {
+      const fd = openSync(join(runDir, "startup.log"), "a");
+      startupOut = fd;
+      startupErr = fd;
+    } catch {
+      // logging must never block the review itself
+    }
+    const child = spawn(cmd.bin, spawnArgs, {
+      cwd: runDir,
+      detached: true,
+      stdio: ["ignore", startupOut ?? "ignore", startupErr ?? "ignore"],
+    });
     child.on("error", (err) => {
       console.error(`[sibyl review] runner spawn failed: ${err instanceof Error ? err.message : String(err)}`);
     });

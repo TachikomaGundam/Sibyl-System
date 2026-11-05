@@ -5,6 +5,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [Unreleased]
+
+### Fixed
+- **Chamber runs can no longer die without a record** (wound
+  `docs/wound-chamber-dead-without-record-20261104.md`, run
+  sibyl-20261102T133505Z-4393): the review tool now captures the detached
+  runner's stdout/stderr into `startup.log` inside the run dir; the CLI entry
+  carries a fatal boundary writing `startup-error.json` on any uncaught
+  fault; and `status --run-id` names `DEAD-WITHOUT-RECORD` when the ledger is
+  silent while the run dir holds only the launcher's staged files — instead
+  of the old indistinguishable "no chamber runs recorded". `SIBYL_CHAMBER_LEDGER`
+  isolates the ledger the way `SIBYL_STATE_FILE` isolates the runs store.
+  No fail-closed property changed; release (version/tag/publish) stays a
+  human gate.
+
 ## [1.6.1] - 2026-11-03
 
 ### Added

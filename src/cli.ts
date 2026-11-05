@@ -19,7 +19,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { mkdirPrivate } from "./fsperm.ts";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -356,13 +356,46 @@ export function examVoice(results: ExamResult[], runId: string, runDir: string, 
   return lines.join("\n");
 }
 
+// W6 dead-without-record probe: a runner that died at/before resolveRun leaves
+// only the launcher's staged files. Any of these traces means it got somewhere
+// (or was legitimately refused) — absence of ALL of them + ledger silence =
+// the dead-run state this probe names instead of the old "no chamber runs
+// recorded" shrug.
+const LIVE_TRACE_NAMES: readonly string[] = ["target", "pids", "evidence", "pro", "con", "judge", "run-record.json", "chamber-ledger.jsonl", "launch-refusal.json"];
+
+export async function deadWithoutRecord(runDir: string): Promise<{ dead: boolean; dirExists: boolean; entries: string[] }> {
+  let entries: string[];
+  try {
+    entries = await readdir(runDir);
+  } catch {
+    return { dead: false, dirExists: false, entries: [] };
+  }
+  const traced = entries.filter((e) => LIVE_TRACE_NAMES.includes(e));
+  return { dead: traced.length === 0, dirExists: true, entries: entries.sort() };
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const { cmd, flags, rest } = parseCliArgs(argv);
   if (cmd === "status") {
     const ledger = await loadLedger(DEFAULT_CHAMBER_LEDGER);
     const tail = typeof flags["tail"] === "string" ? Number(flags["tail"]) : 5;
     let rows: ChamberRecord[] = ledger.rows;
-    if (typeof flags["run-id"] === "string") rows = rows.filter((r) => r.runId === flags["run-id"]);
+    if (typeof flags["run-id"] === "string") {
+      rows = rows.filter((r) => r.runId === flags["run-id"]);
+      if (rows.length === 0) {
+        const root = typeof flags["run-root"] === "string" ? (flags["run-root"] as string) : "/tmp";
+        const dir = join(root, `sibyl-run-${flags["run-id"]}`);
+        const state = await deadWithoutRecord(dir);
+        if (state.dead) {
+          console.log(`run ${flags["run-id"]}: DEAD-WITHOUT-RECORD — dir ${dir} holds only [${state.entries.join(", ")}]; the runner died before any record. Runner stderr (if the launcher captured it): ${join(dir, "startup.log")}`);
+          return 0;
+        }
+        if (state.dirExists) {
+          console.log(`run ${flags["run-id"]}: no ledger row yet, but the run dir shows live traces (${state.entries.join(", ")}) — still running or died mid-phase`);
+          return 0;
+        }
+      }
+    }
     for (const r of rows.slice(-tail)) {
       console.log(`${r.runId} serial=${String(r.serial)} ${r.profile} ${r.terminal ?? "running"} rounds=${String(r.rounds)} artifacts=${String(r.artifacts.length)} evRows=${String(r.evidenceRows)} judge=${r.judgeModelId} dir=${r.runDir}`);
       if (typeof r.notes === "string" && r.notes.length > 0) console.log(`  notes: ${r.notes}`);
@@ -448,5 +481,42 @@ function usage(): number {
 
 const invokedDirectly = process.argv[1] !== undefined && import.meta.url.endsWith(basename(process.argv[1]));
 if (invokedDirectly) {
-  process.exitCode = await main(process.argv.slice(2));
+  // W6 fatal boundary (wound sibyl-20261102T133505Z-4393): a launched runner's
+  // streams can be detached/ignored, so an uncaught fault here used to vanish
+  // entirely. Any rejection now lands in startup-error.json inside the run dir
+  // when the run coordinates are known from argv — dead, but never without a
+  // record. Absent coordinates, the fault goes to stderr and exit 1.
+  const reportFatal = async (where: string, err: unknown): Promise<void> => {
+    const argv = process.argv.slice(2);
+    const flagVal = (name: string): string | null => {
+      const i = argv.indexOf(`--${name}`);
+      if (i >= 0 && argv[i + 1] !== undefined && !argv[i + 1]!.startsWith("--")) return argv[i + 1] as string;
+      const eq = argv.find((a) => a.startsWith(`--${name}=`));
+      return eq === undefined ? null : eq.slice(name.length + 3);
+    };
+    const runId = flagVal("run-id");
+    const root = flagVal("run-root") ?? "/tmp";
+    const message = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    process.exitCode = 1;
+    if (runId === null || !/^sibyl-[A-Za-z0-9-]+$/.test(runId)) {
+      console.error(`sibyl-chamber ${where}: ${message}`);
+      return;
+    }
+    const runDir = join(root, `sibyl-run-${runId}`);
+    const payload = `${JSON.stringify({ kind: "startup-fatal", where, runId, at: new Date().toISOString(), error: message }, null, 2)}\n`;
+    try {
+      await mkdir(runDir, { recursive: true });
+      await writeFile(join(runDir, "startup-error.json"), payload, "utf8");
+    } catch {
+      console.error(`sibyl-chamber ${where}: ${message}`);
+    }
+  };
+  process.on("unhandledRejection", (reason) => {
+    void reportFatal("unhandledRejection", reason);
+  });
+  try {
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (err) {
+    await reportFatal("main", err);
+  }
 }
