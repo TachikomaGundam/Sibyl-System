@@ -183,7 +183,7 @@ test("v1.1 sections: absent config yields the isolated-lane + local-policy + cha
   assert.ok(r.ok);
   if (!r.ok) return;
   assert.equal(r.options.lane.runRoot, "/tmp");
-  assert.equal(r.options.lane.roleTimeoutMs, 600_000);
+  assert.equal(r.options.lane.roleTimeoutMs, 1_200_000);
   assert.equal(r.options.lane.opencodeBin.length > 0, true);
   assert.deepEqual(r.options.modelPolicy.allowedPrefixes, ["local-"]);
   assert.equal(r.options.chamber.maxRounds, 3);
