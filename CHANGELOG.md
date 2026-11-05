@@ -5,7 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
-## [Unreleased]
+## [1.6.2] - 2026-11-05
 
 ### Fixed
 - **Chamber runs can no longer die without a record** (wound
