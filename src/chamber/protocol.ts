@@ -30,6 +30,8 @@ export type LaunchFacts = {
   rc: number | null;
   signal: string | null;
   timedOut: boolean;
+  /** the role exceeded its deadline yet completed within the salvage grace */
+  salvagedMs?: number;
 };
 
 export type Lane = {
@@ -262,6 +264,9 @@ class Protocol {
       }, inject.afterMs);
     }
     const facts = await cfg.lane.launch({ role, title, modelId, message: prompt, launchId: `r${String(round)}-${kind}` });
+    if (facts.salvagedMs !== undefined) {
+      this.#gaps.push(`${role} round ${String(round)} (${kind}): SALVAGED — completed ${String(facts.salvagedMs)}ms past its deadline within grace (work kept; a hung role would still die at grace end, timeout semantics unchanged)`);
+    }
     const text = await fileOrEmpty(this.#abs(rel));
     if (text.trim().length > 0) {
       this.#record.artifacts.push({

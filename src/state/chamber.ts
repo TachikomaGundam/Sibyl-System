@@ -31,8 +31,12 @@ import {
   type InstrumentRef,
 } from "./record.ts";
 
-/** v1.1 append-only chamber ledger; sibling of ~/.sibyl/runs.json (T5 root). */
-export const DEFAULT_CHAMBER_LEDGER: string = join(homedir(), ".sibyl", "chamber-ledger.jsonl");
+/** v1.1 append-only chamber ledger; sibling of ~/.sibyl/runs.json (T5 root).
+ * SIBYL_CHAMBER_LEDGER isolates the ledger the same seam SIBYL_STATE_FILE
+ * gives the runs store — the dead-without-record status path needs a ledger
+ * the test can point at an empty file. */
+export const DEFAULT_CHAMBER_LEDGER: string =
+  process.env["SIBYL_CHAMBER_LEDGER"] ?? join(homedir(), ".sibyl", "chamber-ledger.jsonl");
 
 /** L6 explicit terminal states — a run ends in exactly one of these. */
 export const TERMINAL_STATES = ["CONVERGED", "NEEDS_ROUND", "MEMBER_LOST", "TIMEOUT"] as const;

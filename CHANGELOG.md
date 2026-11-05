@@ -5,6 +5,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [1.6.2] - 2026-11-05
+
+### Fixed
+- **Chamber runs can no longer die without a record** (wound
+  `docs/wound-chamber-dead-without-record-20261104.md`, run
+  sibyl-20261102T133505Z-4393): the review tool now captures the detached
+  runner's stdout/stderr into `startup.log` inside the run dir; the CLI entry
+  carries a fatal boundary writing `startup-error.json` on any uncaught
+  fault; and `status --run-id` names `DEAD-WITHOUT-RECORD` when the ledger is
+  silent while the run dir holds only the launcher's staged files — instead
+  of the old indistinguishable "no chamber runs recorded". `SIBYL_CHAMBER_LEDGER`
+  isolates the ledger the way `SIBYL_STATE_FILE` isolates the runs store.
+  No fail-closed property changed; release (version/tag/publish) stays a
+  human gate.
+- **Chamber role timeout no longer sits below the measured heavy-role band** (wound
+  `docs/wound-role-timeout-below-measured-20261104.md`, runs sibyl-20261104T094318Z-2421 /
+  -094434Z-42db / -094437Z-0a9c / -100648Z-8ed1): `lane.roleTimeoutMs` defaulted to 600s
+  while the engine documents heavy ballots finishing 500-700s under load, so one legitimate
+  heavy role call timed the whole session out before the judge entered. New named default
+  `DEFAULT_ROLE_TIMEOUT_MS = 1_200_000` (single source; the CLI fallback references it instead
+  of repeating the old literal) plus a SALVAGE grace (`DEFAULT_ROLE_SALVAGE_GRACE_MS =
+  900_000`): at deadline the lane no longer SIGKILLs but waits for the role to finish; work
+  completing inside grace is kept and disclosed on the ledger face (`salvagedMs`), grace
+  exhausted still SIGKILLs with timedOut=true. TIMEOUT semantics and quorum untouched -
+  fail-closed unchanged; calibration + salvage only.
+
 ## [1.6.1] - 2026-11-03
 
 ### Added

@@ -123,6 +123,10 @@ export type LaunchSpec = {
   resumeSession?: string;
   pure?: boolean;
   timeoutMs: number;
+  /** salvage grace after timeoutMs (see options DEFAULT_ROLE_SALVAGE_GRACE_MS): the
+   * deadline marks the process overdue but alive; SIGKILL only follows when the grace
+   * ALSO expires. Outcomes that finish inside grace report salvagedMs. */
+  salvageGraceMs?: number;
   /** per-phase suffix so multiple launches of one role keep separate
    * transcripts; the pidfile stays role-keyed (latest launch wins). */
   launchId?: string;
@@ -153,6 +157,9 @@ export type LaunchOutcome = {
   error?: string;
   /** true only when the launch actually ran inside the bwrap sandbox */
   sandboxed: boolean;
+  /** set when the role exceeded its deadline yet completed inside the salvage
+   * grace: disclosed on the face, never hidden as an ordinary success. */
+  salvagedMs?: number;
 };
 
 const SESSION_RE = /"sessionID":"(ses_[A-Za-z0-9]+)"/;
@@ -216,6 +223,7 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
           sandboxed,
         };
         if (spawnError !== undefined) result.error = spawnError;
+        if (deadlineHitAt !== undefined && !timedOut && code === 0) result.salvagedMs = Date.now() - deadlineHitAt;
         resolvePromise(result);
       })();
     };
@@ -232,15 +240,30 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
 
     let timedOut = false;
     let spawnError: string | undefined;
-    const tOut = child.stdout?.pipe(createWriteStream(transcriptPath, { flags: "a" }));
-    const tErr = child.stderr?.pipe(createWriteStream(stderrPath, { flags: "a" }));
-    const timer = setTimeout(() => {
-      timedOut = true;
+    let deadlineHitAt: number | undefined;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const killGroup = (): void => {
       try {
         process.kill(-pgid, "SIGKILL");
       } catch {
         // group already gone — the close event below still finalizes
       }
+    };
+    const tOut = child.stdout?.pipe(createWriteStream(transcriptPath, { flags: "a" }));
+    const tErr = child.stderr?.pipe(createWriteStream(stderrPath, { flags: "a" }));
+    const timer = setTimeout(() => {
+      const grace = spec.salvageGraceMs ?? 0;
+      if (grace <= 0) {
+        timedOut = true;
+        killGroup();
+        return;
+      }
+      // SALVAGE phase: overdue, alive, unfinished -> wait, do not discard.
+      deadlineHitAt = Date.now();
+      graceTimer = setTimeout(() => {
+        timedOut = true;
+        killGroup();
+      }, grace);
     }, spec.timeoutMs);
 
     child.on("error", (err) => {
@@ -248,6 +271,7 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      if (graceTimer !== undefined) clearTimeout(graceTimer);
       const drain: Promise<unknown>[] = [];
       if (tOut !== undefined) drain.push(onceFinished(tOut));
       if (tErr !== undefined) drain.push(onceFinished(tErr));
