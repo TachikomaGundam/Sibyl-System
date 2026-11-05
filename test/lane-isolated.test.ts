@@ -202,3 +202,36 @@ test("launchRole sandbox preflight: missing bwrap falls back to direct spawn and
   assert.equal(out.ok, true, out.error ?? "");
   assert.equal(out.rc, 0);
 });
+
+// --- SALVAGE grace (wound 20261104): deadline passes but the work completes -> keep it.
+//     Grace also exhausted -> SIGKILL and timedOut stay loud. Fail-closed unchanged.
+
+test("salvage: role finishing after its deadline inside grace is KEPT and disclosed", async (t) => {
+  const fx = await fixture(t, "salvage-keep");
+  process.env.STUB_SLEEP = "1";
+  t.after(() => { delete process.env.STUB_SLEEP; });
+  const outcome = await launchRole(
+    { runDir: fx.dir, opencodeBin: fx.stub, configSource: "" },
+    "pro",
+    { title: "t", modelId: "p/m", message: "go", timeoutMs: 400, salvageGraceMs: 8_000 },
+    // STUB_SLEEP via env: fixture's stub sleeps $STUB_SLEEP seconds
+  );
+  // (stub sleeps 1s > 400ms deadline, < 8s grace, exits 0)
+  assert.equal(outcome.timedOut, false);
+  assert.equal(outcome.ok, true);
+  assert.ok(typeof outcome.salvagedMs === "number" && outcome.salvagedMs >= 300);
+});
+
+test("salvage: grace exhausted still kills loudly with timedOut=true", async (t) => {
+  const fx = await fixture(t, "salvage-kill");
+  process.env.STUB_SLEEP = "30";
+  t.after(() => { delete process.env.STUB_SLEEP; });
+  const outcome = await launchRole(
+    { runDir: fx.dir, opencodeBin: fx.stub, configSource: "" },
+    "con",
+    { title: "t", modelId: "p/m", message: "go", timeoutMs: 300, salvageGraceMs: 400 },
+  );
+  assert.equal(outcome.timedOut, true);
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.salvagedMs, undefined);
+});

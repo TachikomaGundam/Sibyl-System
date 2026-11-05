@@ -32,7 +32,7 @@ import { launchRole, collectSessionDb, killRole, type LaneConfig } from "./lane/
 import { parseScenario, type ScenarioSpec } from "./exam/scenario.ts";
 import { runExamScenario, type CandidateDriver, type ExamResult } from "./exam/runner.ts";
 import { runBell } from "./exam/bell.ts";
-import { parseOptions, type PluginOptions } from "./options.ts";
+import { DEFAULT_ROLE_SALVAGE_GRACE_MS, DEFAULT_ROLE_TIMEOUT_MS, parseOptions, type PluginOptions } from "./options.ts";
 
 export type CliFlags = Record<string, string | boolean>;
 
@@ -74,6 +74,7 @@ export type ResolvedRun = {
   runDir: string;
   laneCfg: LaneBase;
   timeoutMs: number;
+  salvageGraceMs: number;
   chamber: ChamberConfig | null;
   exam: { scenarios: ScenarioSpec[]; modelId: string } | null;
   killInjection: { role: ChamberRole; afterMs: number } | null;
@@ -238,7 +239,8 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     killInjection = { role: flags["kill-role"] as ChamberRole, afterMs };
   }
 
-  const timeoutMs = opts?.lane.roleTimeoutMs ?? 600_000;
+  const timeoutMs = opts?.lane.roleTimeoutMs ?? DEFAULT_ROLE_TIMEOUT_MS;
+  const salvageGraceMs = opts?.lane.roleSalvageGraceMs ?? DEFAULT_ROLE_SALVAGE_GRACE_MS;
   if (profile === "exam") {
     const scenarioPaths = flags["scenario"];
     const list = typeof scenarioPaths === "string" ? [scenarioPaths] : [];
@@ -251,7 +253,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     if (scenarios.length === 0) return { ok: false, error: "--profile exam needs at least one --scenario" };
     const only = splitModelId(modelFlag ?? "") ?? null;
     if (only === null) return { ok: false, error: "--profile exam requires --model provider/model" };
-    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
+    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
   }
   if (profile !== "review") return { ok: false, error: `unknown --profile ${profile}` };
 
@@ -283,8 +285,8 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     judgePoolIds: judgePoolIds.length > 0 ? judgePoolIds : [...new Set(judgeSlotNames.map((s) => slotToId(s, effectivePool)).filter((x): x is string => x !== null))],
     lane: null as unknown as Lane, // wired below (type seam: lane needs cfg, cfg needs lane)
   };
-  chamber.lane = makeIsolatedLane(chamber, laneCfg, timeoutMs);
-  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, chamber, exam: null, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
+  chamber.lane = makeIsolatedLane(chamber, laneCfg, timeoutMs, salvageGraceMs);
+  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber, exam: null, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
 }
 
 function slotToId(slot: string, pool: Record<string, { providerID: string; modelID: string }>): string | null {
@@ -293,7 +295,7 @@ function slotToId(slot: string, pool: Record<string, { providerID: string; model
   return `${m.providerID}/${m.modelID}`;
 }
 
-function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: number): Lane {
+function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: number, salvageGraceMs: number): Lane {
   return {
     async launch(req: { role: string; title: string; modelId: string; message: string; launchId: string }): Promise<LaunchFacts> {
       const model = splitModelId(req.modelId);
@@ -301,9 +303,9 @@ function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: numb
       const outcome = await launchRole(
         { runDir: cfg.runDir, opencodeBin: laneCfg.opencodeBin, configSource: laneCfg.configSource },
         req.role,
-        { title: req.title, modelId: req.modelId, message: req.message, launchId: req.launchId, timeoutMs, pure: true },
+        { title: req.title, modelId: req.modelId, message: req.message, launchId: req.launchId, timeoutMs, salvageGraceMs, pure: true },
       );
-      return { ok: outcome.ok, rc: outcome.rc, signal: outcome.signal, timedOut: outcome.timedOut };
+      return { ok: outcome.ok, rc: outcome.rc, signal: outcome.signal, timedOut: outcome.timedOut, ...(outcome.salvagedMs !== undefined ? { salvagedMs: outcome.salvagedMs } : {}) };
     },
     async kill(role: string): Promise<{ ok: boolean; reason?: string }> {
       return await killRole({ runDir: cfg.runDir, opencodeBin: laneCfg.opencodeBin, configSource: laneCfg.configSource }, role);
