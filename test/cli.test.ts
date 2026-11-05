@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { parseCliArgs, resolveRun, splitModelId, examVoice } from "../src/cli.ts";
+import { deadWithoutRecord, parseCliArgs, resolveRun, splitModelId, examVoice } from "../src/cli.ts";
 import { cliCommand, nodeBinary, reviewExecute } from "../src/tools/review.ts";
 import { parseOptions } from "../src/options.ts";
 import { RunStore } from "../src/state/index.ts";
@@ -326,4 +326,57 @@ test("resolveRun: valid staged launch-context passes through verbatim (tool-wrap
   if (!r.ok) return;
   assert.equal(r.run.chamber?.independence?.status, "INDEPENDENT");
   assert.deepEqual(r.run.chamber?.independence?.convenerChain, ["ses_fresh"]);
+});
+
+// ── injury regression 2026-11-04 (wound sibyl-20261102T133505Z-4393):
+// a detached runner that died at/before resolveRun left only the launcher's
+// two staged files — status said "no chamber runs recorded", indistinguishable
+// from never-launched. deadWithoutRecord names the state; main() prints it.
+test("W6 deadWithoutRecord: launcher-staged dir is dead; any live trace is not; absent dir is not", async (t) => {
+  const { mkdtemp, mkdir: mk } = await import("node:fs/promises");
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-w6-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const dead = join(dir, "sibyl-run-dead");
+  await mk(dead, { recursive: true });
+  await writeFile(join(dead, "run-config.json"), "{}", "utf8");
+  await writeFile(join(dead, "launch-context.json"), "{}", "utf8");
+  const d1 = await deadWithoutRecord(dead);
+  assert.equal(d1.dead, true);
+  assert.equal(d1.dirExists, true);
+
+  const alive = join(dir, "sibyl-run-alive");
+  await mk(join(alive, "target"), { recursive: true });
+  const d2 = await deadWithoutRecord(alive);
+  assert.equal(d2.dead, false);
+
+  const d3 = await deadWithoutRecord(join(dir, "sibyl-run-none"));
+  assert.deepEqual(d3, { dead: false, dirExists: false, entries: [] });
+});
+
+test("W6 status CLI: ledger silence + staged-only dir => DEAD-WITHOUT-RECORD line, not the shrug", async (t) => {
+  const { spawn } = await import("node:child_process");
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-w6cli-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const ledger = join(dir, "chamber-ledger.jsonl");
+  await writeFile(ledger, "", "utf8");
+  const runId = "sibyl-21000101T000000Z-dead";
+  const runRoot = join(dir, "root");
+  const runDir = join(runRoot, `sibyl-run-${runId}`);
+  await mkdir(runDir, { recursive: true });
+  await writeFile(join(runDir, "run-config.json"), "{}", "utf8");
+  const cliPath = new URL("../src/cli.ts", import.meta.url).pathname;
+  const hooks = new URL("../tools/register-ts.mjs", import.meta.url).pathname;
+  const out = await new Promise<string>((res, rej) => {
+    const child = spawn(process.execPath, ["--import", hooks, cliPath, "status", "--run-id", runId, "--run-root", runRoot], {
+      env: { ...process.env, SIBYL_CHAMBER_LEDGER: ledger },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let buf = "";
+    child.stdout.on("data", (b: Buffer) => { buf += b.toString(); });
+    child.stderr.on("data", (b: Buffer) => { buf += b.toString(); });
+    child.on("error", rej);
+    child.on("close", () => res(buf));
+  });
+  assert.match(out, /DEAD-WITHOUT-RECORD/);
+  assert.doesNotMatch(out, /no chamber runs recorded/);
 });
