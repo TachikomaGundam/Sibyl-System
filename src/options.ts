@@ -24,6 +24,17 @@ export const DEFAULT_SLOT = "default";
  * L-SINGLE-SOURCE): engine and swarm minter import this, no parity comment
  * anywhere — this module is the home of config defaults. */
 export const DEFAULT_TIMEOUT_MS = 240_000;
+/** Chamber lane per-role budget. Measured parity (engine SALVAGE comment: heavy ballots
+ * finish 500-700s under shared-GPU load; chamber runs 2026-11-04 died at the 600s default,
+ * one over-budget role killing the whole session before the judge — runs
+ * sibyl-20261104T094318Z-2421 / ...100648Z-8ed1). Raised 600_000 -> 1_200_000; the kill
+ * mechanism itself is untouched (hung roles still die loudly, fail-closed unchanged). */
+export const DEFAULT_ROLE_TIMEOUT_MS = 1_200_000;
+/** SALVAGE grace after a role deadline (engine SALVAGE precedent, src/engine/index.ts):
+ * when the deadline passes we no longer SIGKILL immediately; the process gets this extra
+ * budget to finish, so work that provably completes is never discarded. Grace exhausted
+ * still SIGKILLs and reports timedOut=true - fail-closed unchanged, quorum unchanged. */
+export const DEFAULT_ROLE_SALVAGE_GRACE_MS = 900_000;
 
 /** One model-pool entry: a concrete provider/model pair. */
 export const modelSlotSchema = z.object({
@@ -96,7 +107,8 @@ export const pluginOptionsSchema = z
       runRoot: z.string().min(1).default("/tmp"),
       opencodeBin: z.string().min(1).prefault(discoverOpencodeBin),
       configSource: z.string().prefault(() => join(homedir(), ".config", "opencode", "opencode.jsonc")),
-      roleTimeoutMs: z.number().int().min(5_000).default(600_000),
+      roleTimeoutMs: z.number().int().min(5_000).default(DEFAULT_ROLE_TIMEOUT_MS),
+      roleSalvageGraceMs: z.number().int().min(0).default(DEFAULT_ROLE_SALVAGE_GRACE_MS),
       /** Exam venue: absolute dirs tmpfs-masked from the candidate (grader files,
        * other runs). Empty = venue runs unsandboxed and SAYS SO on the voice face. */
       examMaskDirs: z.array(z.string().min(2)).default([]),
