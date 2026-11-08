@@ -37,7 +37,7 @@
     "reap": "node --no-warnings scripts/session-reap.mjs"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.19.4",
+    "@opencode-ai/plugin": "1.19.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
