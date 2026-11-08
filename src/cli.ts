@@ -19,7 +19,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { access, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { mkdirPrivate } from "./fsperm.ts";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -29,12 +29,13 @@ import { DEFAULT_CHAMBER_LEDGER, listChecksumTargets, loadLedger, spotcheckComma
 import { buildVoice, renderVoice } from "./chamber/synthesis.ts";
 import { runChamber, type ChamberConfig, type ChamberRole, type Lane, type LaunchFacts } from "./chamber/protocol.ts";
 import { launchRole, collectSessionDb, killRole, type LaneConfig } from "./lane/isolated.ts";
+import { startCredentialProxy, type CredentialProxy, type RoleProxyConfig } from "./lane/proxy.ts";
 import { parseScenario, type ScenarioSpec } from "./exam/scenario.ts";
 import { runExamScenario, type CandidateDriver, type ExamResult } from "./exam/runner.ts";
 import { runBell } from "./exam/bell.ts";
-import { DEFAULT_ROLE_SALVAGE_GRACE_MS, DEFAULT_ROLE_TIMEOUT_MS, parseOptions, type PluginOptions } from "./options.ts";
+import { DEFAULT_ROLE_SALVAGE_GRACE_MS, DEFAULT_ROLE_TIMEOUT_MS, parseOptions, type CredentialProxyConfig, type PluginOptions } from "./options.ts";
 
-export type CliFlags = Record<string, string | boolean>;
+export type CliFlags = Record<string, string | boolean | readonly string[]>;
 
 const BOOLEAN_FLAGS: readonly string[] = ["detach", "help"];
 
@@ -47,18 +48,35 @@ export function parseCliArgs(argv: readonly string[]): { cmd: string; flags: Cli
     if (tok.startsWith("--")) {
       const eq = tok.indexOf("=");
       if (eq > 0) {
-        flags[tok.slice(2, eq)] = tok.slice(eq + 1);
+        addStringFlag(flags, tok.slice(2, eq), tok.slice(eq + 1));
       } else {
         const name = tok.slice(2);
         const nxt = argv[i + 1];
         if (nxt !== undefined && !nxt.startsWith("--") && !BOOLEAN_FLAGS.includes(name)) {
-          flags[tok.slice(2)] = nxt;
+          addStringFlag(flags, tok.slice(2), nxt);
           i += 1;
         } else flags[tok.slice(2)] = true;
       }
     } else rest.push(tok);
   }
   return { cmd, flags, rest };
+}
+
+function addStringFlag(flags: CliFlags, key: string, value: string): void {
+  if (key !== "scenario") {
+    flags[key] = value;
+    return;
+  }
+  const prior = flags[key];
+  if (typeof prior === "string") flags[key] = [prior, value];
+  else if (Array.isArray(prior)) flags[key] = [...prior, value];
+  else flags[key] = value;
+}
+
+function stringFlagValues(flags: CliFlags, key: string): readonly string[] {
+  const value = flags[key];
+  if (typeof value === "string") return [value];
+  return Array.isArray(value) ? value : [];
 }
 
 export function splitModelId(modelId: string): { providerID: string; modelID: string } | null {
@@ -79,7 +97,21 @@ export type ResolvedRun = {
   exam: { scenarios: ScenarioSpec[]; modelId: string } | null;
   killInjection: { role: ChamberRole; afterMs: number } | null;
   examMaskDirs: string[];
+  /** null = relay OFF (configSource copy, today's semantics). */
+  credentialProxy: CredentialProxyConfig | null;
 };
+
+/** Fail-closed seat/proxy reconciliation: every provider a run intends to seat
+ * must have an upstream in the proxy map, or the run refuses at resolution
+ * time with an actionable, provider-named error (never a mid-run auth mystery). */
+function proxyProviderError(proxyCfg: CredentialProxyConfig, providerID: string, where: string): string | null {
+  const known = Object.keys(proxyCfg.providers).join(", ") || "(none configured)";
+  if (providerID.length === 0) {
+    return `credentialProxy is enabled but ${where} resolves to an empty providerID (host default), which the relay cannot own — point ${where} at a provider listed in credentialProxy.providers (${known}).`;
+  }
+  if (proxyCfg.providers[providerID] !== undefined) return null;
+  return `credentialProxy is enabled but ${where} uses provider "${providerID}", which has no entry in credentialProxy.providers (known: ${known}) — add its upstream or seat ${where} on a proxied provider.`;
+}
 
 /** Build every run parameter from flags + (optional) plugin-options config
  * file, applying E4 policy at seat resolution. Pure-ish: only fs reads. */
@@ -118,6 +150,7 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
       ? pool
       : { ...pool, default: splitModelId(modelFlag) as { providerID: string; modelID: string } };
   const policy = opts?.modelPolicy ?? { allowedPrefixes: ["local-"] };
+  const proxyCfg = opts?.credentialProxy ?? null;
   const seed = typeof flags["seed"] === "string" ? flags["seed"] : randomBytes(8).toString("hex");
   const maxRounds = typeof flags["max-rounds"] === "string" ? Number(flags["max-rounds"]) : opts?.chamber.maxRounds ?? 3;
   if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 8) return { ok: false, error: `--max-rounds must be 1..8` };
@@ -158,6 +191,10 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
 
   const runDir = join(laneCfg.runRoot, `sibyl-run-${runId}`);
   await mkdirPrivate(runDir);
+  const failAfterRun = async (error: string): Promise<{ ok: false; error: string }> => {
+    await rm(runDir, { recursive: true, force: true });
+    return { ok: false, error };
+  };
 
   // F-W1b option 3 (council run sibyl-20261023T102611Z-16a2, owner-approved 2026-10-23):
   // an explicit --run-id declares a TOOL-launched review; if the tool never staged its
@@ -226,36 +263,45 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     try {
       await copyFile(abs, targetPath);
     } catch (e) {
-      return { ok: false, error: `--target unreadable: ${e instanceof Error ? e.message : String(e)}` };
+      return failAfterRun(`--target unreadable: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   const profile = typeof flags["profile"] === "string" ? flags["profile"] : "review";
   let killInjection: ResolvedRun["killInjection"] = null;
   if (typeof flags["kill-role"] === "string" && typeof flags["kill-after"] === "string") {
-    if (!["evidence", "pro", "con", "judge"].includes(flags["kill-role"])) return { ok: false, error: `--kill-role invalid` };
+    if (!["evidence", "pro", "con", "judge"].includes(flags["kill-role"])) return failAfterRun("--kill-role invalid");
     const afterMs = Number(flags["kill-after"]);
-    if (!Number.isFinite(afterMs) || afterMs < 0) return { ok: false, error: `--kill-after must be ms` };
+    if (!Number.isFinite(afterMs) || afterMs < 0) return failAfterRun("--kill-after must be ms");
     killInjection = { role: flags["kill-role"] as ChamberRole, afterMs };
   }
 
   const timeoutMs = opts?.lane.roleTimeoutMs ?? DEFAULT_ROLE_TIMEOUT_MS;
   const salvageGraceMs = opts?.lane.roleSalvageGraceMs ?? DEFAULT_ROLE_SALVAGE_GRACE_MS;
   if (profile === "exam") {
-    const scenarioPaths = flags["scenario"];
-    const list = typeof scenarioPaths === "string" ? [scenarioPaths] : [];
+    const list = stringFlagValues(flags, "scenario");
     const scenarios: ScenarioSpec[] = [];
     for (const p of list) {
-      const v = parseScenario(await readFile(p, "utf8"));
-      if (!v.ok) return { ok: false, error: `scenario ${p}: ${v.errors.join("; ")}` };
+      let raw: string;
+      try {
+        raw = await readFile(p, "utf8");
+      } catch (e) {
+        return failAfterRun(`scenario ${p}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const v = parseScenario(raw);
+      if (!v.ok) return failAfterRun(`scenario ${p}: ${v.errors.join("; ")}`);
       scenarios.push(v.scenario as ScenarioSpec);
     }
-    if (scenarios.length === 0) return { ok: false, error: "--profile exam needs at least one --scenario" };
+    if (scenarios.length === 0) return failAfterRun("--profile exam needs at least one --scenario");
     const only = splitModelId(modelFlag ?? "") ?? null;
-    if (only === null) return { ok: false, error: "--profile exam requires --model provider/model" };
-    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
+    if (only === null) return failAfterRun("--profile exam requires --model provider/model");
+    if (proxyCfg !== null) {
+      const bad = proxyProviderError(proxyCfg, only.providerID, "--model");
+      if (bad !== null) return failAfterRun(bad);
+    }
+    return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber: null, exam: { scenarios, modelId: modelFlag as string }, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [], credentialProxy: proxyCfg } };
   }
-  if (profile !== "review") return { ok: false, error: `unknown --profile ${profile}` };
+  if (profile !== "review") return failAfterRun(`unknown --profile ${profile}`);
 
   const slots: Record<ChamberRole, string> = {
     evidence: opts?.chamber.roles.evidence ?? "default",
@@ -268,6 +314,15 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     slots.pro = "default";
     slots.con = "default";
     slots.judge = "default";
+  }
+  if (proxyCfg !== null) {
+    const fallback = { providerID: "", modelID: "" };
+    const seatedSlots = new Set<string>(modelFlag !== null ? ["default"] : [...Object.values(slots), ...judgeSlotNames]);
+    for (const slot of seatedSlots) {
+      const pid = (effectivePool[slot] ?? effectivePool["default"] ?? fallback).providerID;
+      const bad = proxyProviderError(proxyCfg, pid, `model pool slot "${slot}"`);
+      if (bad !== null) return failAfterRun(bad);
+    }
   }
   const chamber: ChamberConfig = {
     runId,
@@ -285,8 +340,8 @@ export async function resolveRun(flags: CliFlags): Promise<{ ok: true; run: Reso
     judgePoolIds: judgePoolIds.length > 0 ? judgePoolIds : [...new Set(judgeSlotNames.map((s) => slotToId(s, effectivePool)).filter((x): x is string => x !== null))],
     lane: null as unknown as Lane, // wired below (type seam: lane needs cfg, cfg needs lane)
   };
-  chamber.lane = makeIsolatedLane(chamber, laneCfg, timeoutMs, salvageGraceMs);
-  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber, exam: null, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [] } };
+  chamber.lane = makeIsolatedLane(chamber, laneCfg, timeoutMs, salvageGraceMs, null);
+  return { ok: true, run: { runId, runDir, laneCfg, timeoutMs, salvageGraceMs, chamber, exam: null, killInjection, examMaskDirs: opts?.lane.examMaskDirs ?? [], credentialProxy: proxyCfg } };
 }
 
 function slotToId(slot: string, pool: Record<string, { providerID: string; modelID: string }>): string | null {
@@ -295,13 +350,27 @@ function slotToId(slot: string, pool: Record<string, { providerID: string; model
   return `${m.providerID}/${m.modelID}`;
 }
 
-function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: number, salvageGraceMs: number): Lane {
+function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: number, salvageGraceMs: number, roleProxy: CredentialProxy | null): Lane {
   return {
     async launch(req: { role: string; title: string; modelId: string; message: string; launchId: string }): Promise<LaunchFacts> {
       const model = splitModelId(req.modelId);
       if (model === null) return { ok: false, rc: null, signal: null, timedOut: false };
+      let proxyRole: RoleProxyConfig | undefined;
+      if (roleProxy !== null) {
+        const issued = roleProxy.issueRole(req.role, model.providerID);
+        if (!issued.ok) return { ok: false, rc: null, signal: null, timedOut: false };
+        proxyRole = issued.config;
+      }
       const outcome = await launchRole(
-        { runDir: cfg.runDir, opencodeBin: laneCfg.opencodeBin, configSource: laneCfg.configSource },
+        {
+          runDir: cfg.runDir,
+          opencodeBin: laneCfg.opencodeBin,
+          configSource: laneCfg.configSource,
+          sandboxMaskDirs: ["/home"],
+          requireSandbox: process.platform === "linux",
+          sandboxWriteScope: "role",
+          ...(proxyRole !== undefined ? { proxyRole } : {}),
+        },
         req.role,
         { title: req.title, modelId: req.modelId, message: req.message, launchId: req.launchId, timeoutMs, salvageGraceMs, pure: true },
       );
@@ -313,8 +382,15 @@ function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: numb
   };
 }
 
-function makeExamDriver(laneCfgBase: LaneBase, runDir: string, modelId: string, timeoutMs: number, maskDirs: readonly string[], bwrapProbe: string): { driver: CandidateDriver; sandboxed: boolean } {
-  const lc: LaneConfig = { runDir, opencodeBin: laneCfgBase.opencodeBin, configSource: laneCfgBase.configSource, sandboxMaskDirs: maskDirs, bwrapBin: bwrapProbe };
+function makeExamDriver(laneCfgBase: LaneBase, runDir: string, modelId: string, timeoutMs: number, maskDirs: readonly string[], bwrapProbe: string, candidateProxy: RoleProxyConfig | null): { driver: CandidateDriver; sandboxed: boolean } {
+  const lc: LaneConfig = {
+    runDir,
+    opencodeBin: laneCfgBase.opencodeBin,
+    configSource: laneCfgBase.configSource,
+    sandboxMaskDirs: maskDirs,
+    bwrapBin: bwrapProbe,
+    ...(candidateProxy !== null ? { proxyRole: candidateProxy } : {}),
+  };
   let turnNo = 0;
   const run = async (message: string, resume?: string) => {
     turnNo += 1;
@@ -437,36 +513,69 @@ export async function main(argv: readonly string[]): Promise<number> {
       console.log(`SIBYL chamber detached: run ${run.runId}\n  dir: ${run.runDir}\n  status: node src/cli.ts status --run-id ${run.runId}\n  voice will land in the run record; ledger stays append-only`);
       return 0;
     }
-    if (run.chamber !== null) {
-      const chamberCfg: ChamberConfig = { ...run.chamber };
-      if (run.killInjection !== null) chamberCfg.killInjection = run.killInjection;
-      const res = await runChamber(chamberCfg);
-      for (const role of ["evidence", "pro", "con", "judge"] as const) {
-        await collectSessionDb({ runDir: run.runDir, opencodeBin: run.laneCfg.opencodeBin, configSource: run.laneCfg.configSource }, role).catch(() => null);
-      }
-      console.log(renderVoice(buildVoice(res)));
-      return 0;
-    }
-    if (run.exam !== null) {
-      const { driver, sandboxed } = makeExamDriver(run.laneCfg, run.runDir, run.exam.modelId, run.timeoutMs, run.examMaskDirs, "/usr/bin/bwrap");
-      const results: ExamResult[] = [];
-      const scPaths = typeof flags["scenario"] === "string" ? [flags["scenario"]] : [];
-      if (flags["allow-unbellied"] !== true) {
-        for (const sp of scPaths) {
-          const b = await runBell(sp);
-          if (!b.ok) { console.log(`SIBYL REFUSE — bell preflight failed for ${sp}: ${b.detail}`); return 1; }
-          console.log(`bell preflight OK: ${sp} — ${b.detail}`);
+    // credential relay lifecycle: started ONLY when configured, closed in the
+    // finally on every exit path (the real keys live nowhere else in this run).
+    let proxy: CredentialProxy | null = null;
+    try {
+      if (run.credentialProxy !== null) {
+        const started = await startCredentialProxy({
+          upstreams: run.credentialProxy.providers,
+          maxRequestsPerRole: run.credentialProxy.maxRequestsPerRole,
+          receiptsPath: join(run.runDir, "proxy-receipts.jsonl"),
+        });
+        if (!started.ok) {
+          console.error(`sibyl-chamber: credential proxy refused: ${started.error}`);
+          return 2;
         }
+        proxy = started.proxy;
       }
-      for (const sc of run.exam.scenarios) results.push(await runExamScenario(sc, run.runDir, driver));
-      // exam runs now seal their face too: the ONE-VOICE verify line must be true
-      await writeChecksums(run.runDir, await listChecksumTargets(run.runDir));
-      console.log(examVoice(results, run.runId, run.runDir, sandboxed ? `ON (masked ${String(run.examMaskDirs.length)} dir(s))` : run.examMaskDirs.length === 0 ? "OFF (lane.examMaskDirs empty — grader files are candidate-readable)" : "OFF (bwrap missing at /usr/bin/bwrap)"));
-      return 0;
+      return await executeRun(run, proxy, flags);
+    } finally {
+      if (proxy !== null) await proxy.close();
     }
-    return 2;
   }
   return usage();
+}
+
+async function executeRun(run: ResolvedRun, proxy: CredentialProxy | null, flags: CliFlags): Promise<number> {
+  if (run.chamber !== null) {
+    const chamberCfg: ChamberConfig = { ...run.chamber };
+    if (run.killInjection !== null) chamberCfg.killInjection = run.killInjection;
+    if (proxy !== null) chamberCfg.lane = makeIsolatedLane(chamberCfg, run.laneCfg, run.timeoutMs, run.salvageGraceMs, proxy);
+    const res = await runChamber(chamberCfg);
+    for (const role of ["evidence", "pro", "con", "judge"] as const) {
+      await collectSessionDb({ runDir: run.runDir, opencodeBin: run.laneCfg.opencodeBin, configSource: run.laneCfg.configSource }, role).catch(() => null);
+    }
+    console.log(renderVoice(buildVoice(res)));
+    return 0;
+  }
+  if (run.exam !== null) {
+    let candidateProxy: RoleProxyConfig | null = null;
+    if (proxy !== null) {
+      const issued = proxy.issueRole("candidate", splitModelId(run.exam.modelId)?.providerID ?? "");
+      if (!issued.ok) {
+        console.error(`sibyl-chamber: credential proxy refused the candidate seat: ${issued.error}`);
+        return 2;
+      }
+      candidateProxy = issued.config;
+    }
+    const { driver, sandboxed } = makeExamDriver(run.laneCfg, run.runDir, run.exam.modelId, run.timeoutMs, run.examMaskDirs, "/usr/bin/bwrap", candidateProxy);
+    const results: ExamResult[] = [];
+    const scPaths = typeof flags["scenario"] === "string" ? [flags["scenario"]] : [];
+    if (flags["allow-unbellied"] !== true) {
+      for (const sp of scPaths) {
+        const b = await runBell(sp);
+        if (!b.ok) { console.log(`SIBYL REFUSE — bell preflight failed for ${sp}: ${b.detail}`); return 1; }
+        console.log(`bell preflight OK: ${sp} — ${b.detail}`);
+      }
+    }
+    for (const sc of run.exam.scenarios) results.push(await runExamScenario(sc, run.runDir, driver));
+    // exam runs now seal their face too: the ONE-VOICE verify line must be true
+    await writeChecksums(run.runDir, await listChecksumTargets(run.runDir));
+    console.log(examVoice(results, run.runId, run.runDir, sandboxed ? `ON (masked ${String(run.examMaskDirs.length)} dir(s))` : run.examMaskDirs.length === 0 ? "OFF (lane.examMaskDirs empty — grader files are candidate-readable)" : "OFF (bwrap missing at /usr/bin/bwrap)"));
+    return 0;
+  }
+  return 2;
 }
 
 function usage(): number {

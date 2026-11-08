@@ -17,14 +17,28 @@ import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
 
+import { type RoleProxyConfig } from "./proxy.ts";
 import { resolveSeat, type SeatPolicy, type SeatPool } from "./seating.ts";
 
 export const DEFAULT_PINNED_PATH = "/usr/bin:/bin";
+
+export type ContainmentLevel = "hardened" | "portable";
+
+/** Linux bubblewrap is the only filesystem-containment mechanism this package
+ * implements. Other platforms may launch only through the credential relay. */
+export function containmentLevel(platform: NodeJS.Platform, bwrapPresent: boolean, maskCount: number): ContainmentLevel {
+  return platform === "linux" && bwrapPresent && maskCount > 0 ? "hardened" : "portable";
+}
 
 export type LaneConfig = {
   runDir: string;
   opencodeBin: string;
   configSource: string;
+  /** Proxy mode: when set, the role receives a SYNTHESIZED provider-only config
+   * pointing at the credential relay (src/lane/proxy.ts) and configSource is
+   * NOT copied — the host config (which may carry inline apiKeys) never enters
+   * the role home. Absent = today's copy-configSource semantics unchanged. */
+  proxyRole?: RoleProxyConfig;
   pinnedPath?: string;
   /** exam venue (2026-10-05 leak wound: a candidate could read the grader's
    * scenario files from the shared filesystem): absolute dirs to tmpfs-mask
@@ -33,11 +47,17 @@ export type LaneConfig = {
   sandboxMaskDirs?: readonly string[];
   /** test seam: which bwrap binary to probe (default /usr/bin/bwrap) */
   bwrapBin?: string;
+  /** Refuse to launch instead of falling back to the host when bwrap is unavailable. */
+  requireSandbox?: boolean;
+  /** Limit writable sandbox mounts to the current role rather than the whole run. */
+  sandboxWriteScope?: "run" | "role";
 };
 
 /** Pure sandbox argv builder (unit-testable without spawning). The candidate
- * sees a read-only root with the mask dirs emptied, EXCEPT the run dir itself,
- * rebound on top of any masked parent (dir-parent first, then bind). */
+ * sees a read-only root, private process namespaces, and mask dirs emptied,
+ * EXCEPT the run dir itself, rebound on top of any masked parent (dir-parent
+ * first, then bind). Network remains shared so the configured model provider
+ * is the only runtime egress path; agent-controlled network tools are denied. */
 export function composeSandboxArgs(opts: {
   bwrapBin: string;
   maskDirs: readonly string[];
@@ -45,7 +65,24 @@ export function composeSandboxArgs(opts: {
   bin: string;
   args: readonly string[];
 }): string[] {
-  const argv = [opts.bwrapBin, "--ro-bind", "/", "/", "--dev", "/dev", "--die-with-parent"];
+  const argv = [
+    opts.bwrapBin,
+    "--unshare-user",
+    "--unshare-pid",
+    "--unshare-ipc",
+    "--unshare-uts",
+    "--unshare-cgroup",
+    "--new-session",
+    "--disable-userns",
+    "--ro-bind",
+    "/",
+    "/",
+    "--proc",
+    "/proc",
+    "--dev",
+    "/dev",
+    "--die-with-parent",
+  ];
   for (const m of opts.maskDirs) argv.push("--tmpfs", m);
   for (const k of opts.keepDirs) argv.push("--dir", posixDirname(k), "--bind", k, k);
   argv.push("--", opts.bin, ...opts.args);
@@ -83,8 +120,22 @@ export function rolePaths(cfg: LaneConfig, role: string): RolePaths {
   };
 }
 
-/** Build the pinned env for one role (L1). Inherited env keeps provider
- * wiring working; only the isolation-critical vars are overridden. */
+type ProviderEntry = { npm: string; options: { baseURL: string; apiKey: string }; models?: Record<string, { name: string }> };
+
+/** Proxy-mode role config: the WHOLE provider surface — provider id, npm
+ * loader, relay URL, scoped token, model catalog — so the role needs neither
+ * configSource nor any host secret. The apiKey slot carries the scoped relay
+ * token (revocable, quota-bound), never the provider key. */
+export function synthesizeProxyConfig(p: RoleProxyConfig): { provider: Record<string, ProviderEntry> } {
+  const entry: ProviderEntry = { npm: p.npm, options: { baseURL: p.relayBaseUrl, apiKey: p.roleToken } };
+  if (p.models.length > 0) entry.models = Object.fromEntries(p.models.map((m) => [m, { name: m }]));
+  return { provider: { [p.providerID]: entry } };
+}
+
+/** Build the minimal runtime environment for one role. Without proxy mode the
+ * provider surface comes from configSource; with proxy mode it is synthesized
+ * from the relay config ONLY. Host credentials and ambient proxies never cross
+ * into the untrusted role process. */
 export async function prepareRoleHome(
   cfg: LaneConfig,
   role: string,
@@ -96,15 +147,27 @@ export async function prepareRoleHome(
   await mkdirPrivate(join(paths.home, ".local", "state", "opencode"));
   await mkdirPrivate(paths.workspace);
   await mkdirPrivate(join(cfg.runDir, "pids"));
-  try {
-    if (cfg.configSource.length > 0) {
-      await copyFile(cfg.configSource, join(paths.home, ".config", "opencode", "opencode.jsonc"));
+  const roleConfigPath = join(paths.home, ".config", "opencode", "opencode.jsonc");
+  if (cfg.proxyRole !== undefined) {
+    // proxy mode: synthesized provider-only config; configSource is deliberately
+    // NOT read. A write fault here throws (the role would run provider-less —
+    // louder dead than silently mispointed, matching mkdirPrivate precedent).
+    await writeFile(roleConfigPath, `${JSON.stringify(synthesizeProxyConfig(cfg.proxyRole), null, 2)}\n`, "utf8");
+  } else {
+    try {
+      if (cfg.configSource.length > 0) {
+        await copyFile(cfg.configSource, roleConfigPath);
+      }
+    } catch {
+      // a missing config source is tolerated: the role runs on built-in defaults
     }
-  } catch {
-    // a missing config source is tolerated: the role runs on built-in defaults
   }
+  await writeFile(
+    join(paths.workspace, "opencode.jsonc"),
+    '{"tools":{"bash":false},"websearch":false,"permission":{"bash":"deny","webfetch":"deny","websearch":"deny","task":"deny","skill":"deny","question":"deny","read":"allow","edit":"allow","external_directory":"allow"}}\n',
+    "utf8",
+  );
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
     HOME: paths.home,
     XDG_DATA_HOME: join(paths.home, ".local", "share"),
     XDG_CACHE_HOME: join(paths.home, ".cache"),
@@ -112,7 +175,13 @@ export async function prepareRoleHome(
     OPENCODE_DB: paths.dbPath,
     OPENCODE_DISABLE_AUTOUPDATE: "1",
     PATH: cfg.pinnedPath ?? DEFAULT_PINNED_PATH,
+    LANG: "C.UTF-8",
   };
+  if (process.platform === "win32") {
+    env.USERPROFILE = paths.home;
+    env.APPDATA = join(paths.home, "AppData", "Roaming");
+    env.LOCALAPPDATA = join(paths.home, "AppData", "Local");
+  }
   return { paths, env };
 }
 
@@ -175,23 +244,53 @@ export function extractSessionId(transcriptText: string): string | null {
  */
 export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec): Promise<LaunchOutcome> {
   const startedAt = new Date().toISOString();
-  const { paths, env } = await prepareRoleHome(cfg, role);
+  const paths = rolePaths(cfg, role);
   const suffix = spec.launchId === undefined || spec.launchId === "main" ? "" : `-${spec.launchId}`;
   const transcriptPath = join(paths.roleDir, `transcript${suffix}.jsonl`);
   const stderrPath = join(paths.roleDir, `stderr${suffix}.log`);
+  const bwrap = cfg.bwrapBin ?? "/usr/bin/bwrap";
+  const mask = cfg.sandboxMaskDirs ?? [];
+  const containment = containmentLevel(process.platform, existsSync(bwrap), mask.length);
+  if (cfg.requireSandbox && containment !== "hardened") {
+    return {
+      ok: false,
+      rc: null,
+      signal: null,
+      timedOut: false,
+      paths,
+      transcriptPath,
+      sessionId: null,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      error: `sandbox required; SANDBOX-UNAVAILABLE: hardened containment requires Linux bubblewrap and mask directories (platform=${process.platform}; bwrap=${bwrap})`,
+      sandboxed: false,
+    };
+  }
+  if (containment === "portable" && process.platform !== "linux" && cfg.proxyRole === undefined) {
+    return {
+      ok: false,
+      rc: null,
+      signal: null,
+      timedOut: false,
+      paths,
+      transcriptPath,
+      sessionId: null,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      error: "PORTABLE-REQUIRES-CREDENTIAL-PROXY: configure credentialProxy or run on Linux with bubblewrap",
+      sandboxed: false,
+    };
+  }
+  const { env } = await prepareRoleHome(cfg, role);
   const promptPath = join(paths.roleDir, `prompt${suffix}.md`);
   await writeFile(promptPath, spec.message, "utf8");
   await writeFile(transcriptPath, "", "utf8");
   await writeFile(stderrPath, "", "utf8");
   const args = composeRunArgs(spec);
-  // Sandbox preflight is existence-only: no bwrap or no mask list → direct
-  // spawn, disclosed on the outcome (and thence the voice face). A venue that
-  // claims isolation it does not have is worse than one that admits none.
-  const bwrap = cfg.bwrapBin ?? "/usr/bin/bwrap";
-  const mask = cfg.sandboxMaskDirs ?? [];
-  const sandboxed = mask.length > 0 && existsSync(bwrap);
+  const sandboxed = containment === "hardened";
+  const keepDirs = cfg.sandboxWriteScope === "role" ? [paths.roleDir] : [cfg.runDir];
   const spawnArgv = sandboxed
-    ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs: [cfg.runDir], bin: cfg.opencodeBin, args })
+    ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs, bin: cfg.opencodeBin, args })
     : [cfg.opencodeBin, ...args];
 
   return new Promise<LaunchOutcome>((resolvePromise) => {
@@ -244,7 +343,8 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const killGroup = (): void => {
       try {
-        process.kill(-pgid, "SIGKILL");
+        if (process.platform === "win32") child.kill("SIGKILL");
+        else process.kill(-pgid, "SIGKILL");
       } catch {
         // group already gone — the close event below still finalizes
       }
@@ -312,7 +412,8 @@ export async function killRole(cfg: LaneConfig, role: string): Promise<{ ok: boo
     return { ok: false, reason: `pidfile content is not a usable pgid: "${text.trim()}"` };
   }
   try {
-    process.kill(-pgid, "SIGKILL");
+    if (process.platform === "win32") process.kill(pgid, "SIGKILL");
+    else process.kill(-pgid, "SIGKILL");
     return { ok: true };
   } catch (err) {
     const code = typeof err === "object" && err !== null ? String(Reflect.get(err, "code")) : "unknown";
