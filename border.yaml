@@ -21,6 +21,12 @@ rules:
       # - REVISIT AND REMOVE once border fix lands. Council vote sibyl-20261108T085732Z-dfdc
       # 3A/0R; author-field laundering risk explicitly accepted, recorded in this entry.
       - "noreply@github.com"
+      # Owner-signed 2026-11-08 (council-adjacent follow-up, same release wheel). Account
+      # PRIMARY email: GitHub's web-merge button authored merge commit 757afda (PR #10,
+      # already public at origin/main tip) under this author identity; committer side is
+      # GitHub <noreply@github.com> (entry above) and the name field TachikomaGundam was
+      # already allowed — this line completes the pair GitHub itself writes on merges.
+      - "TachikomaGundam@users.noreply.github.com"
     names:
       - "TachikomaGundam"
       - "GitHub"
