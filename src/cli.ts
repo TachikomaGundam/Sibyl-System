@@ -367,7 +367,7 @@ function makeIsolatedLane(cfg: ChamberConfig, laneCfg: LaneBase, timeoutMs: numb
           opencodeBin: laneCfg.opencodeBin,
           configSource: laneCfg.configSource,
           sandboxMaskDirs: ["/home"],
-          requireSandbox: true,
+          requireSandbox: process.platform === "linux",
           sandboxWriteScope: "role",
           ...(proxyRole !== undefined ? { proxyRole } : {}),
         },
