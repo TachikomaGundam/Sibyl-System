@@ -223,6 +223,23 @@ test("W2 dead-without-record: unrecordable rows force CANNOT_ANSWER, never a vot
   assert.ok(run.notes?.includes("left no terminal row"), run.notes);
 });
 
+test("swarm draft write failure rejects the task instead of approving without a durable draft", async () => {
+  const { deps, ctx, store } = await fixture(happyScript());
+  const orig = store.createRun.bind(store);
+  store.createRun = async (input) => {
+    const r = await orig(input);
+    await mkdir(join(r.spaceDir, "worker-0-t1.draft.md"));
+    return r;
+  };
+
+  const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);
+
+  assert.ok(!out.startsWith("SIBYL SWARM: APPROVE"), out.slice(0, 120));
+  assert.ok(out.includes("done=0 failed=2 suspended=0"), out);
+  const run = await oneRun(store);
+  assert.equal(run.verdict?.verdict, "CANNOT_ANSWER");
+});
+
 test("W3 stamp: swarm terminal record carries the instrument face; receipt names the ruler", async () => {
   const { deps, ctx, store } = await fixture(happyScript());
   const out = await swarmExecute(deps, { artifact: "goal artifact text\nsecond line", goal: "build it" }, ctx);

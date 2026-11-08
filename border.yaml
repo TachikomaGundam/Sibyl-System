@@ -14,8 +14,16 @@ rules:
     # `git log --format=%ae | sort -u` for this repo (owner GitHub noreply).
     emails:
       - "TachikomaGundam@users.noreply.github.com"
+      # Owner-signed 2026-11-08. Exact pair (this email + name GitHub below) admits
+      # exactly ONE identity: GitHub <noreply@github.com>, the web-merge author of
+      # 6747e8f, already public at origin/main tip. Workaround for a KNOWN border
+      # push-path defect (counts already-public objects as transmitted; ticket open)
+      # - REVISIT AND REMOVE once border fix lands. Council vote sibyl-20261108T085732Z-dfdc
+      # 3A/0R; author-field laundering risk explicitly accepted, recorded in this entry.
+      - "noreply@github.com"
     names:
       - "TachikomaGundam"
+      - "GitHub"
   hosts: []
   ips: []
   pathPatterns:
@@ -40,3 +48,11 @@ allow:
   # shapes they hunt (home-path + Windows-path literals in the refusal rules).
   # Same self-detection class as the consult.ts entry above.
   - { rule: "*", match: "*", file: "scripts/git-hooks/pre-push" }
+  # Internal working evidence (.gitignore'd, in ZERO commits — probed 2026-11-08:
+  # `git ls-files .omo` = 0, absent from HEAD and origin/main trees). Hit classes
+  # sampled same-day: "Generic API Key" fires on run-record digest fields
+  # ("key"/"head"/"rulesHash": sha256/hex values — the 40-hex FP class on record
+  # in the machine wiki ops/dev-env-pitfalls); ssh-target fires on synthetic
+  # fixture identities (poc@sibyl.local, bot@default.local). Zero real
+  # credentials in sampled files; these paths can never reach a push.
+  - { rule: "*", match: "*", file: ".omo/**" }
