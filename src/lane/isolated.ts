@@ -22,6 +22,14 @@ import { resolveSeat, type SeatPolicy, type SeatPool } from "./seating.ts";
 
 export const DEFAULT_PINNED_PATH = "/usr/bin:/bin";
 
+export type ContainmentLevel = "hardened" | "portable";
+
+/** Linux bubblewrap is the only filesystem-containment mechanism this package
+ * implements. Other platforms may launch only through the credential relay. */
+export function containmentLevel(platform: NodeJS.Platform, bwrapPresent: boolean, maskCount: number): ContainmentLevel {
+  return platform === "linux" && bwrapPresent && maskCount > 0 ? "hardened" : "portable";
+}
+
 export type LaneConfig = {
   runDir: string;
   opencodeBin: string;
@@ -169,6 +177,11 @@ export async function prepareRoleHome(
     PATH: cfg.pinnedPath ?? DEFAULT_PINNED_PATH,
     LANG: "C.UTF-8",
   };
+  if (process.platform === "win32") {
+    env.USERPROFILE = paths.home;
+    env.APPDATA = join(paths.home, "AppData", "Roaming");
+    env.LOCALAPPDATA = join(paths.home, "AppData", "Local");
+  }
   return { paths, env };
 }
 
@@ -237,7 +250,8 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
   const stderrPath = join(paths.roleDir, `stderr${suffix}.log`);
   const bwrap = cfg.bwrapBin ?? "/usr/bin/bwrap";
   const mask = cfg.sandboxMaskDirs ?? [];
-  if (cfg.requireSandbox && (mask.length === 0 || !existsSync(bwrap))) {
+  const containment = containmentLevel(process.platform, existsSync(bwrap), mask.length);
+  if (cfg.requireSandbox && containment !== "hardened") {
     return {
       ok: false,
       rc: null,
@@ -248,7 +262,22 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
       sessionId: null,
       startedAt,
       endedAt: new Date().toISOString(),
-      error: `sandbox required but bwrap or mask configuration is unavailable (bwrap=${bwrap})`,
+      error: `sandbox required; SANDBOX-UNAVAILABLE: hardened containment requires Linux bubblewrap and mask directories (platform=${process.platform}; bwrap=${bwrap})`,
+      sandboxed: false,
+    };
+  }
+  if (containment === "portable" && process.platform !== "linux" && cfg.proxyRole === undefined) {
+    return {
+      ok: false,
+      rc: null,
+      signal: null,
+      timedOut: false,
+      paths,
+      transcriptPath,
+      sessionId: null,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      error: "PORTABLE-REQUIRES-CREDENTIAL-PROXY: configure credentialProxy or run on Linux with bubblewrap",
       sandboxed: false,
     };
   }
@@ -258,7 +287,7 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
   await writeFile(transcriptPath, "", "utf8");
   await writeFile(stderrPath, "", "utf8");
   const args = composeRunArgs(spec);
-  const sandboxed = mask.length > 0 && existsSync(bwrap);
+  const sandboxed = containment === "hardened";
   const keepDirs = cfg.sandboxWriteScope === "role" ? [paths.roleDir] : [cfg.runDir];
   const spawnArgv = sandboxed
     ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs, bin: cfg.opencodeBin, args })
@@ -314,7 +343,8 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const killGroup = (): void => {
       try {
-        process.kill(-pgid, "SIGKILL");
+        if (process.platform === "win32") child.kill("SIGKILL");
+        else process.kill(-pgid, "SIGKILL");
       } catch {
         // group already gone — the close event below still finalizes
       }
@@ -382,7 +412,8 @@ export async function killRole(cfg: LaneConfig, role: string): Promise<{ ok: boo
     return { ok: false, reason: `pidfile content is not a usable pgid: "${text.trim()}"` };
   }
   try {
-    process.kill(-pgid, "SIGKILL");
+    if (process.platform === "win32") process.kill(pgid, "SIGKILL");
+    else process.kill(-pgid, "SIGKILL");
     return { ok: true };
   } catch (err) {
     const code = typeof err === "object" && err !== null ? String(Reflect.get(err, "code")) : "unknown";
