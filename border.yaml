@@ -14,8 +14,16 @@ rules:
     # `git log --format=%ae | sort -u` for this repo (owner GitHub noreply).
     emails:
       - "TachikomaGundam@users.noreply.github.com"
+      # Owner-signed 2026-11-08. Exact pair (this email + name GitHub below) admits
+      # exactly ONE identity: GitHub <noreply@github.com>, the web-merge author of
+      # 6747e8f, already public at origin/main tip. Workaround for a KNOWN border
+      # push-path defect (counts already-public objects as transmitted; ticket open)
+      # - REVISIT AND REMOVE once border fix lands. Council vote sibyl-20261108T085732Z-dfdc
+      # 3A/0R; author-field laundering risk explicitly accepted, recorded in this entry.
+      - "noreply@github.com"
     names:
       - "TachikomaGundam"
+      - "GitHub"
   hosts: []
   ips: []
   pathPatterns:
