@@ -12,7 +12,7 @@
 // is deliberately no pattern-based kill anywhere in this module.
 
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync } from "node:fs";
+import { accessSync, constants, createWriteStream, existsSync, lstatSync, readlinkSync } from "node:fs";
 import { copyFile, readFile, writeFile } from "node:fs/promises";
 import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
@@ -53,16 +53,128 @@ export type LaneConfig = {
   sandboxWriteScope?: "run" | "role";
 };
 
+/** Chase the symlink chain of bin host-side: [bin, hop1, …, final]. Every hop
+ * dir must exist inside the sandbox — execvp follows the chain at exec time,
+ * so binding only bin's parent and the final file's parent leaves an
+ * intermediate symlink dangling (2026-11-08 wound round 3). A cycle or a
+ * missing hop ends the chain where it stands (spawn then fails loud, named). */
+export function symlinkChain(bin: string, maxHops = 40): string[] {
+  const hops: string[] = [bin];
+  let cur = bin;
+  for (let i = 0; i < maxHops; i++) {
+    let link: string;
+    try {
+      if (!lstatSync(cur).isSymbolicLink()) return hops;
+      link = readlinkSync(cur);
+    } catch {
+      return hops;
+    }
+    cur = link.startsWith("/") ? link : join(dirname(cur), link);
+    hops.push(cur);
+  }
+  return hops;
+}
+
+/** Lane-spawn wound 20261108: a tmpfs mask whose subtree contains the lane
+ * binary made the binary itself unreachable inside the sandbox (execvp ENOENT
+ * -> every role died instantly, chamber ledgered MEMBER_LOST). Invariant: the
+ * builder must keep the executable reachable under ANY mask set, along the
+ * FULL symlink chain. Minimal rebind: for every masked hop path (bin and each
+ * resolution hop), re-create the missing intermediate dirs and READ-ONLY
+ * re-bind just the hop's parent directory — or, if the parent IS the masking
+ * root (binding it would undo the mask), the file itself. Everything else
+ * under the mask stays hidden; the rebind is read-only, so a role can never
+ * write back into the host binary. Returns the bwrap tokens, empty when no
+ * mask hits any hop. */
+export function binProtectionArgv(opts: { maskDirs: readonly string[]; hops: readonly string[] }): string[] {
+  const targets: string[] = [];
+  for (const p of opts.hops) {
+    const mask = maskedRoot(opts.maskDirs, p);
+    if (mask === null) continue;
+    const parent = dirname(p);
+    // a hop hanging ON the masking root binds as a file; binding the root dir would undo the mask
+    const target = parent === mask ? p : parent;
+    if (!targets.includes(target)) targets.push(target);
+  }
+  // shallowest bind first: a deeper target inside an already-bound subtree is redundant
+  targets.sort((a, b) => a.length - b.length || a.localeCompare(b));
+  const dirs: string[] = [];
+  const binds: string[] = [];
+  const seenDirs = new Set<string>();
+  for (const t of targets) {
+    if (binds.some((b) => t === b || t.startsWith(b + "/"))) continue;
+    const mask = maskedRoot(opts.maskDirs, t);
+    if (mask === null) continue;
+    // intermediate dirs between the masking root and the bound target (the target itself is the bind)
+    const segs = t.slice(mask === "/" ? 1 : mask.length + 1).split("/").filter((s) => s.length > 0);
+    segs.pop();
+    let cur = mask === "/" ? "" : mask;
+    for (const s of segs) {
+      cur = `${cur}/${s}`;
+      if (!seenDirs.has(cur)) {
+        dirs.push(cur);
+        seenDirs.add(cur);
+      }
+    }
+    binds.push(t);
+  }
+  const argv: string[] = [];
+  for (const d of dirs) argv.push("--dir", d);
+  for (const b of binds) argv.push("--ro-bind", b, b);
+  return argv;
+}
+
+/** A bare bin name execs under DIFFERENT PATHs across the sandbox boundary
+ * (host PATH outside, pinned /usr/bin:/bin inside) — the 2026-11-08 lane wound
+ * died on `bwrap: execvp opencode: No such file or directory` this way. A bare
+ * name is therefore resolved once, host-side, and that EXACT absolute path is
+ * execed on both faces (also closes the two-binaries divergence). A name that
+ * does not resolve passes through unchanged so the spawn still fails loud, named. */
+export function resolveLaneBin(bin: string, pathEnv: string): string {
+  if (bin.length === 0 || bin.includes("/")) return bin;
+  for (const dir of pathEnv.split(":")) {
+    if (dir.length === 0) continue;
+    const candidate = join(dir, bin);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // not here — next PATH entry
+    }
+  }
+  return bin;
+}
+
+/** The masking root that covers absolute path p (matched at a path-segment
+ * boundary: a root covers paths strictly below it, never a sibling whose name
+ * merely starts with the same characters). Null = no mask hits p. */
+function maskedRoot(maskDirs: readonly string[], p: string): string | null {
+  for (const m of maskDirs) {
+    if (m === "/") {
+      if (p.length > 1) return "/";
+      continue;
+    }
+    const base = m.endsWith("/") ? m.slice(0, -1) : m;
+    if (p.startsWith(base + "/")) return base;
+  }
+  return null;
+}
+
 /** Pure sandbox argv builder (unit-testable without spawning). The candidate
  * sees a read-only root, private process namespaces, and mask dirs emptied,
  * EXCEPT the run dir itself, rebound on top of any masked parent (dir-parent
- * first, then bind). Network remains shared so the configured model provider
- * is the only runtime egress path; agent-controlled network tools are denied. */
+ * first, then bind), EXCEPT the lane binary, re-bound read-only per
+ * binProtectionArgv (masks first, bin protection, then writable keeps). Network
+ * remains shared so the configured model provider is the only runtime egress
+ * path; agent-controlled network tools are denied. */
 export function composeSandboxArgs(opts: {
   bwrapBin: string;
   maskDirs: readonly string[];
   keepDirs: readonly string[];
   bin: string;
+  /** host-chased symlink chain of bin ([bin, hop1, …, final], symlinkChain);
+   * default = [bin] alone. Protection rebinds every masked hop's parent. */
+  binChain?: readonly string[];
   args: readonly string[];
 }): string[] {
   const argv = [
@@ -84,6 +196,7 @@ export function composeSandboxArgs(opts: {
     "--die-with-parent",
   ];
   for (const m of opts.maskDirs) argv.push("--tmpfs", m);
+  argv.push(...binProtectionArgv({ maskDirs: opts.maskDirs, hops: opts.binChain ?? [opts.bin] }));
   for (const k of opts.keepDirs) argv.push("--dir", posixDirname(k), "--bind", k, k);
   argv.push("--", opts.bin, ...opts.args);
   return argv;
@@ -289,9 +402,10 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
   const args = composeRunArgs(spec);
   const sandboxed = containment === "hardened";
   const keepDirs = cfg.sandboxWriteScope === "role" ? [paths.roleDir] : [cfg.runDir];
+  const bin = resolveLaneBin(cfg.opencodeBin, process.env["PATH"] ?? "");
   const spawnArgv = sandboxed
-    ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs, bin: cfg.opencodeBin, args })
-    : [cfg.opencodeBin, ...args];
+    ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs, bin, binChain: symlinkChain(bin), args })
+    : [bin, ...args];
 
   return new Promise<LaunchOutcome>((resolvePromise) => {
     const child = spawn(spawnArgv[0] as string, spawnArgv.slice(1), {

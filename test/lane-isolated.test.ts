@@ -4,21 +4,24 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  binProtectionArgv,
   collectSessionDb,
   composeRunArgs,
   composeSandboxArgs,
+  resolveLaneBin,
   extractSessionId,
   killRole,
   launchRole,
   prepareRoleHome,
   rolePaths,
   seatOrDeny,
+  symlinkChain,
   type LaneConfig,
 } from "../src/lane/isolated.ts";
 
@@ -187,6 +190,152 @@ test("composeSandboxArgs: ro root, dev, tmpfs masks, then keep rebinds (dir-pare
   assert.equal(argv[keep + 3], "/tmp/sibyl-run-x");
   assert.ok(j("--") < argv.indexOf("/abs/opencode"));
   assert.deepEqual(argv.slice(argv.indexOf("--") + 1), ["/abs/opencode", "run", "--title", "t"]);
+});
+
+// --- lane-spawn wound 20261108: masks covering the bin must never kill execvp -------
+
+test("binProtectionArgv: wound shape — /home mask + symlinked npm-global bin rebinds both parents read-only", () => {
+  const argv = binProtectionArgv({
+    maskDirs: ["/home"],
+    hops: ["/home/you/.npm-global/bin/opencode", "/home/you/.npm-global/lib/node_modules/opencode-ai/bin/opencode.exe"],
+  });
+  assert.deepEqual(argv, [
+    "--dir", "/home/you",
+    "--dir", "/home/you/.npm-global",
+    "--dir", "/home/you/.npm-global/lib",
+    "--dir", "/home/you/.npm-global/lib/node_modules",
+    "--dir", "/home/you/.npm-global/lib/node_modules/opencode-ai",
+    "--ro-bind", "/home/you/.npm-global/bin", "/home/you/.npm-global/bin",
+    "--ro-bind", "/home/you/.npm-global/lib/node_modules/opencode-ai/bin", "/home/you/.npm-global/lib/node_modules/opencode-ai/bin",
+  ]);
+});
+
+test("binProtectionArgv: multi-hop chain rebinds EVERY hop — an intermediate symlink must not dangle", () => {
+  const argv = binProtectionArgv({
+    maskDirs: ["/home"],
+    hops: [
+      "/home/you/.local/bin/opencode",
+      "/home/you/.npm-global/bin/opencode",
+      "/home/you/.npm-global/lib/node_modules/opencode-ai/bin/opencode.exe",
+    ],
+  });
+  assert.deepEqual(argv, [
+    "--dir", "/home/you",
+    "--dir", "/home/you/.local",
+    "--dir", "/home/you/.npm-global",
+    "--dir", "/home/you/.npm-global/lib",
+    "--dir", "/home/you/.npm-global/lib/node_modules",
+    "--dir", "/home/you/.npm-global/lib/node_modules/opencode-ai",
+    "--ro-bind", "/home/you/.local/bin", "/home/you/.local/bin",
+    "--ro-bind", "/home/you/.npm-global/bin", "/home/you/.npm-global/bin",
+    "--ro-bind", "/home/you/.npm-global/lib/node_modules/opencode-ai/bin", "/home/you/.npm-global/lib/node_modules/opencode-ai/bin",
+  ]);
+});
+
+test("binProtectionArgv: bin outside every mask -> zero tokens", () => {
+  assert.deepEqual(binProtectionArgv({ maskDirs: ["/home"], hops: ["/usr/local/bin/opencode"] }), []);
+});
+
+test("binProtectionArgv: mask matching is path-segment bounded (/home never hits /homepage)", () => {
+  assert.deepEqual(binProtectionArgv({ maskDirs: ["/home"], hops: ["/homepage/x/oc"] }), []);
+});
+
+test("binProtectionArgv: a hop outside the mask protects nothing on its own", () => {
+  const argv = binProtectionArgv({ maskDirs: ["/home"], hops: ["/home/u/bin/oc", "/opt/oc/exe"] });
+  assert.deepEqual(argv, ["--dir", "/home/u", "--ro-bind", "/home/u/bin", "/home/u/bin"]);
+});
+
+test("binProtectionArgv: bin hanging directly on the masking root binds the FILE, never the root", () => {
+  const argv = binProtectionArgv({ maskDirs: ["/data"], hops: ["/data/tool", "/data/store/tool.bin"] });
+  assert.deepEqual(argv, ["--ro-bind", "/data/tool", "/data/tool", "--ro-bind", "/data/store", "/data/store"]);
+});
+
+test("binProtectionArgv: deeper target inside an already-bound subtree is not re-bound", () => {
+  const argv = binProtectionArgv({ maskDirs: ["/srv"], hops: ["/srv/tools/bin/oc", "/srv/tools/bin/oc.real"] });
+  assert.deepEqual(argv, ["--dir", "/srv/tools", "--ro-bind", "/srv/tools/bin", "/srv/tools/bin"]);
+});
+
+test("symlinkChain: regular file=[itself]; relative+absolute hops chased; dangling stops; cycles bounded", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-chain-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const real = join(dir, "real.bin");
+  await writeFile(real, "#!/bin/sh\n", "utf8");
+  const rel = join(dir, "rel");
+  await symlink("real.bin", rel);
+  const abs = join(dir, "abs");
+  await symlink(rel, abs);
+  assert.deepEqual(symlinkChain(real), [real]);
+  assert.deepEqual(symlinkChain(rel), [rel, real]);
+  assert.deepEqual(symlinkChain(abs), [abs, rel, real]);
+  const dangler = join(dir, "dangler");
+  await symlink("no-such-target", dangler);
+  assert.deepEqual(symlinkChain(dangler), [dangler, join(dir, "no-such-target")], "dangling chain stops at the missing hop");
+  const a = join(dir, "loop-a");
+  const b = join(dir, "loop-b");
+  await symlink(b, a);
+  await symlink(a, b);
+  assert.ok(symlinkChain(a, 5).length <= 6, "cycle bounded by maxHops, never infinite");
+});
+
+test("composeSandboxArgs: bin protection lands after every tmpfs mask and before the writable keeps", () => {
+  const argv = composeSandboxArgs({
+    bwrapBin: "/usr/bin/bwrap",
+    maskDirs: ["/home"],
+    keepDirs: ["/tmp/sibyl-run-y"],
+    bin: "/home/u/.npm-global/bin/opencode",
+    binChain: ["/home/u/.npm-global/bin/opencode", "/home/u/.npm-global/lib/node_modules/oc/bin/oc.exe"],
+    args: ["run"],
+  });
+  const lastTmpfs = argv.map((t, i) => [t, i] as const).filter(([t]) => t === "--tmpfs").map(([, i]) => i).pop() as number;
+  const firstRoBind = argv.indexOf("--ro-bind", argv.indexOf("--dev"));
+  const keepBind = argv.indexOf("--bind");
+  assert.ok(lastTmpfs < firstRoBind, "protection rebinds on top of the tmpfs mask");
+  assert.ok(firstRoBind < keepBind, "writable keeps still come last");
+  assert.ok(argv.includes("/home/u/.npm-global/bin"), "bin parent re-exposed read-only");
+  assert.equal(argv.filter((t) => t === "--bind").length, 1, "only the keep dir keeps its writable bind");
+});
+
+test("resolveLaneBin: bare names resolve host-side on PATH; absolute paths and misses pass through", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-resolvebin-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const hit = join(dir, "oc");
+  await writeFile(hit, "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(hit, 0o755);
+  const decoy = join(dir, "oc-decoy");
+  await writeFile(decoy, "not executable", "utf8");
+  assert.equal(resolveLaneBin("/abs/bin/oc", `${dir}:/usr/bin`), "/abs/bin/oc", "absolute spec untouched");
+  assert.equal(resolveLaneBin("oc", `/nonexistent:${dir}:/usr/bin`), hit, "first executable PATH hit wins");
+  assert.equal(resolveLaneBin("oc-decoy", dir), "oc-decoy", "non-executable is skipped, name passes through");
+  assert.equal(resolveLaneBin("no-such-bin-xyz", `${dir}:/usr/bin`), "no-such-bin-xyz", "miss passes through to fail loud, named at spawn");
+  assert.equal(resolveLaneBin("", dir), "");
+});
+
+test("launchRole + real bwrap: a bin living INSIDE the masked dir still execs (wound 20261108 end-to-end)", { skip: existsSync("/usr/bin/bwrap") ? false : "needs bubblewrap" }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "sibyl-wound-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fakeHome = join(root, "fakehome");
+  const binDir = join(fakeHome, ".npm-global", "bin");
+  const pkgDir = join(fakeHome, ".npm-global", "lib", "node_modules", "oc", "bin");
+  await mkdir(binDir, { recursive: true });
+  await mkdir(pkgDir, { recursive: true });
+  const real = join(pkgDir, "oc.exe");
+  await writeFile(real, '#!/bin/sh\nprintf \'{"type":"text","sessionID":"ses_wound12345","part":{"type":"text","text":"ok"}}\\n\'\nexit 0\n', "utf8");
+  await chmod(real, 0o755);
+  await symlink("../lib/node_modules/oc/bin/oc.exe", join(binDir, "opencode"));
+  const out = await launchRole(
+    {
+      runDir: join(root, "run"),
+      opencodeBin: join(binDir, "opencode"),
+      configSource: "",
+      sandboxMaskDirs: [fakeHome],
+      requireSandbox: true,
+    },
+    "evidence",
+    { title: "x", modelId: "p/m", message: "hi", timeoutMs: 15_000, launchId: "w1" },
+  );
+  assert.equal(out.sandboxed, true, "hardened sandbox actually ran");
+  assert.equal(out.ok, true, `bin under the mask must exec, got rc=${String(out.rc)} err=${out.error ?? ""}`);
+  assert.equal(out.sessionId, "ses_wound12345", "the rebound bin produced its transcript");
 });
 
 test("launchRole sandbox preflight: missing bwrap falls back to direct spawn and SAYS sandboxed=false", async () => {
