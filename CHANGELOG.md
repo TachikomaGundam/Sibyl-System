@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [1.6.4] - 2026-11-08
+
+### Fixed
+- **Portable role containment.** Non-Linux role launches now require the credential
+  relay instead of inheriting host provider credentials; Windows role homes use
+  Windows profile variables and timeout termination targets the child process.
+- **Release documentation.** The README now documents the chamber-ledger override,
+  correct proxy origins and endpoint set, portable containment, complete CLI examples,
+  and npm-safe source links.
+
 ## [1.6.3] - 2026-11-07
 
 ### Added
