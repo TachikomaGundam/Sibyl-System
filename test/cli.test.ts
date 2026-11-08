@@ -25,6 +25,11 @@ test("parseCliArgs: = form, space form, bare booleans, positional rest", () => {
   assert.deepEqual(r.rest, ["extra"]);
 });
 
+test("parseCliArgs: repeated scenario flags preserve every path in order", () => {
+  const r = parseCliArgs(["run", "--scenario", "first.json", "--scenario=second.json"]);
+  assert.deepEqual(r.flags["scenario"], ["first.json", "second.json"]);
+});
+
 test("splitModelId: first-slash split, rejects degenerate ids", () => {
   assert.deepEqual(splitModelId("local-qwen/qwen3.8-flash-next"), { providerID: "local-qwen", modelID: "qwen3.8-flash-next" });
   assert.deepEqual(splitModelId("a/b/c"), { providerID: "a", modelID: "b/c" });
@@ -166,6 +171,45 @@ test("resolveRun: opencodeBin defaults to PATH name, never empty", async () => {
   } finally {
     if (saved !== undefined) process.env.OPENCODE_BIN = saved;
   }
+});
+
+test("resolveRun: exam profile loads every repeated scenario", async () => {
+  const f = parseCliArgs([
+    "run",
+    "--target",
+    "-",
+    "--goal",
+    "g",
+    "--profile",
+    "exam",
+    "--scenario",
+    "scenarios/portable-device-binding.json",
+    "--scenario",
+    "scenarios/canary-single-probe-correction.json",
+    "--model",
+    "p/m",
+  ]);
+  const r = await resolveRun(f.flags);
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  if (!r.ok) return;
+  assert.equal(r.run.exam?.scenarios.length, 2);
+  await rm(r.run.runDir, { recursive: true, force: true });
+});
+
+test("resolveRun: invalid scenario leaves no newly-created run directory", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-cli-invalid-scenario-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const r = await resolveRun({
+    target: "-",
+    goal: "g",
+    profile: "exam",
+    model: "p/m",
+    scenario: join(dir, "missing.json"),
+    "run-root": dir,
+  });
+  assert.ok(!r.ok);
+  const entries = await import("node:fs/promises").then(({ readdir }) => readdir(dir));
+  assert.deepEqual(entries, []);
 });
 
 // --- W1 convener-recusal: identity gate + launch-context pickup ----------------
