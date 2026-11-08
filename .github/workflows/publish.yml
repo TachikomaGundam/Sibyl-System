@@ -30,12 +30,24 @@ jobs:
       # 2026-11-02). Pinned exact: updates happen only via reviewed commits
       # (this file is gate-territory; dependabot does not float this constant).
       - run: npm install -g --ignore-scripts npm@11.21.1
-      - name: supply-chain liveness gate (S1/S2)
+      - name: supply-chain liveness gate (S1/S2) + release-day auto-witness (H1)
+        # Auto-witness (council-2-alt, 2026-11-08): the tag push above also
+        # triggered scheduled-audit.yml on THIS commit; the gate now WAITS for
+        # a green audit causally tied to this tag — head_sha exact, and either
+        # the push run whose head_branch is this tag name, or a default-branch
+        # run created at/after this publish run began (which is after the tag
+        # ref existed). Cadence is explicit and bounded: poll every 30s, hard
+        # 20-minute bound (measured audit wall time 12-35s per run history —
+        # >34x margin; rationale recorded in test/publish-gate.test.ts).
+        # Past the bound the gate FAILS with an ::error:: annotation — a
+        # timeout is a loud refusal, never silence (the v1.6.3 lesson).
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.sha }}
-        run: node scripts/publish-gate.mjs --workflow scheduled-audit.yml
+          TAG_REF: ${{ github.ref_name }}
+          TAG_REF_CREATED_AT: ${{ github.run_started_at }}
+        run: node scripts/publish-gate.mjs --workflow scheduled-audit.yml --poll-seconds=30 --wait-minutes=20
       - run: npm ci --ignore-scripts
       - run: ./ship.sh
       - run: npm audit --audit-level=high

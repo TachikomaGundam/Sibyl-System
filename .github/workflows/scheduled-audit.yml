@@ -2,9 +2,14 @@ name: scheduled-audit
 
 # Supply-chain window door (v1.6.0 seating, ruling fe01 item 2). Weekly npm
 # audit on main. This workflow's LATEST run is the release witness: the
-# publish gate (scripts/publish-gate.mjs) fails unless this file's newest
-# scheduled run is green, bound to the released commit (S1), and younger than
-# min(1.5x interval, 14d cap) (S2 - cap constant lives in the gate script).
+# publish gate (scripts/publish-gate.mjs) fails unless a green run here is
+# bound to the released commit (S1) and fresh (S2 - cap constant lives in the
+# gate script).
+# Release-day auto-witness (H1, council-2-alt 2026-11-08): a v* TAG PUSH runs
+# THIS SAME audit on the tagged commit, so the publish gate can wait minutes
+# for a witness causally tied to the tag instead of demanding a lucky weekly
+# green. Least privilege is unchanged on the tag path: contents:read only,
+# zero npm/registry access, identical steps to the scheduled path.
 # NOTE: GitHub silently disables schedules on repos inactive 60 days - the
 # publish gate's staleness check is the detector; a dead cron shows up as a
 # blocked publish, never as a silent pass.
@@ -13,6 +18,8 @@ on:
   schedule:
     - cron: "17 4 * * 1"   # Mondays 04:17 UTC
   workflow_dispatch:        # manual trigger to widen the witness after a fix
+  push:
+    tags: ["v*"]            # release-day witness: audits exactly the tagged commit
 
 permissions:
   contents: read
