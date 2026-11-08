@@ -181,7 +181,7 @@ your host `configSource`, and it never receives the upstream API key.
       "providers": {
         "review-gateway": {
           "baseUrl": "https://gateway.example.com",
-          "keyFile": "/home/you/.config/sibyl/review-gateway.key",
+          "keyFile": "~/.config/sibyl/review-gateway.key",
           "models": ["review-model"]
         },
         "local": {
