@@ -41,6 +41,11 @@ type RepoOpts = {
   annotated?: boolean;
   /** annotated-tag message body (default: the release subject line only) */
   tagMessage?: string;
+  /** W5: default wires origin to a local bare repo with main LANDED (the post
+   * W5 legal lane: release commit reaches remote main before the tag is
+   * pushed). "unpushed" = origin exists, main never pushed (stranding class);
+   * "none" = no origin remote; "unreachable" = origin points at a dead path. */
+  remote?: "landed" | "unpushed" | "none" | "unreachable";
 };
 
 async function makeRepo(opts: RepoOpts): Promise<{ dir: string; oid: string }> {
@@ -53,6 +58,15 @@ async function makeRepo(opts: RepoOpts): Promise<{ dir: string; oid: string }> {
   }
   await git(dir, "add", "-A");
   await git(dir, "commit", "--quiet", "-m", "release commit");
+  const remoteMode = opts.remote ?? "landed";
+  if (remoteMode === "unreachable") {
+    await git(dir, "remote", "add", "origin", join(dir, "..", "definitely-missing-remote.git"));
+  } else if (remoteMode !== "none") {
+    const bare = `${dir}-origin.git`;
+    await git(dir, "init", "--bare", "-b", "main", "--quiet", bare);
+    await git(dir, "remote", "add", "origin", bare);
+    if (remoteMode === "landed") await git(dir, "push", "--quiet", "origin", "main");
+  }
   await git(dir, opts.annotated === false ? "tag" : "tag", ...(opts.annotated === false ? [] : ["-a"]), opts.tag, ...(opts.annotated === false ? [] : ["-m", opts.tagMessage ?? `release ${opts.tag}`]));
   if (opts.receiptInWorktree && !opts.receiptInTag) {
     await writeFile(join(dir, "docs", "release", `${opts.tag}.md`), receiptBody(opts.tag), "utf8");
@@ -396,4 +410,33 @@ test("W4-HY-4 lightweight tag (no message body) → hygiene scan exempt", async 
   assert.equal(res.crashed, false, res.stderr);
   assert.equal(res.code, 0, res.stderr);
   void oid;
+});
+
+test("W5-1 compliant tag whose commit is NOT on remote main → refuse (stranding class)", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true, remote: "unpushed" });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 1, res.stderr);
+  assert.match(res.stderr, /W5|NOT contained/);
+});
+
+test("W5-2 compliant tag with no origin remote at all → refuse (containment unverifiable)", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true, remote: "none" });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 1, res.stderr);
+  assert.match(res.stderr, /W5|unreachable|no refs\/heads\/main/);
+});
+
+test("W5-3 compliant tag whose commit IS on remote main → pass (the cured lane)", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true, remote: "landed" });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "v9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 0, res.stderr);
 });
