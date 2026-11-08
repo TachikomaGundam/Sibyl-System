@@ -1,4 +1,6 @@
-# Sibyl gate config — DRAFT for owner signature (2026-10-04, seat abathur).
+# Sibyl gate config — owner-signed (drafted 2026-10-04 by seat abathur; policy
+# entries signed in-place through 2026-11-08; header ruling delivered verbatim
+# "转" by owner 2026-11-08).
 # Model: border's own dogfood config (version 1; every suppression is an
 # explicit allow entry that shows in the report's allow-hits — nothing hidden).
 version: 1
