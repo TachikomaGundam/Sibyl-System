@@ -76,6 +76,67 @@ export const swarmSlotsSchema = z
   .prefault({});
 export type SwarmSlots = z.infer<typeof swarmSlotsSchema>;
 
+/** v1.7 credential relay: default per-role request quota at the proxy.
+ * L-SINGLE-SOURCE: this is the one definition; schema and any consumer import it. */
+export const DEFAULT_PROXY_QUOTA = 2000;
+
+/** http(s) URL without embedded credentials - a key smuggled into the URL
+ * would ride every error message and receipt; refused at the parse boundary. */
+function isCleanHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return (u.protocol === "http:" || u.protocol === "https:") && u.username.length === 0 && u.password.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One proxied provider upstream. EXACTLY ONE of keyFile / keyEnv / keyless is
+ * required: two is an ambiguous trust decision, zero would silently forward
+ * unauthenticated. npm/models steer the synthesized role config (src/lane/
+ * isolated.ts synthesizeProxyConfig) so the role needs no other provider data.
+ */
+export const proxyUpstreamSchema = z
+  .object({
+    /** real provider endpoint; http(s), no userinfo */
+    baseUrl: z.string().refine(isCleanHttpUrl, { error: "baseUrl must be an http(s) URL without embedded credentials" }),
+    /** file holding the provider key (read once at relay start, trimmed) */
+    keyFile: z.string().min(1).optional(),
+    /** env var holding the provider key (read once at relay start, trimmed) */
+    keyEnv: z.string().min(1).optional(),
+    /** upstream needs no auth (local llama.cpp / vLLM etc.) */
+    keyless: z.literal(true).optional(),
+    /** opencode npm package that loads this provider (OpenAI-compatible default) */
+    npm: z.string().min(1).default("@ai-sdk/openai-compatible"),
+    /** model ids exposed under this provider (synthesized into the role config) */
+    models: z.array(z.string().min(1)).prefault([]),
+  })
+  .strict()
+  .refine(
+    (u) =>
+      (u.keyFile !== undefined ? 1 : 0) + (u.keyEnv !== undefined ? 1 : 0) + (u.keyless === true ? 1 : 0) === 1,
+    { error: "exactly one of keyFile / keyEnv / keyless is required" },
+  );
+export type ProxyUpstream = z.infer<typeof proxyUpstreamSchema>;
+
+/**
+ * Optional credential proxy (src/lane/proxy.ts). ABSENT (the default) keeps the
+ * present lane semantics exactly: roles receive the configSource copy. When
+ * set, every seated provider must appear in `providers` (fail-closed at run
+ * resolution) and roles receive ONLY a scoped relay token through a synthesized
+ * provider-only config - the real key never crosses into a role home or env.
+ */
+export const credentialProxySchema = z
+  .object({
+    /** providerID -> real upstream. Only these providers may take a seat. */
+    providers: z.record(z.string().min(1), proxyUpstreamSchema).prefault({}),
+    /** per-role request quota at the relay; integer >= 1 */
+    maxRequestsPerRole: z.number().int().min(1).default(DEFAULT_PROXY_QUOTA),
+  })
+  .strict();
+export type CredentialProxyConfig = z.infer<typeof credentialProxySchema>;
+
 // Top level is STRICT on purpose: the host passes the registration tuple's second
 // element VERBATIM as this object (SDK `Plugin = (input, options?: PluginOptions)`),
 // so option fields live at the TOP LEVEL. A nested `{ options: {...} }` wrapper or a
@@ -120,6 +181,10 @@ export const pluginOptionsSchema = z
       allowedPrefixes: z.array(z.string().min(1)).min(1).default(["local-"]),
     })
     .prefault({}),
+  /** v1.7 OPTIONAL credential relay (src/lane/proxy.ts). Absent = today's
+   * semantics unchanged (roles copy configSource). Present = isolated roles get
+   * only a scoped relay token; the relay owns the real keys. */
+  credentialProxy: credentialProxySchema.optional(),
   /** v1.1 chamber (democratic-centralism review engine) seat slots + rounds. */
   chamber: z
     .object({

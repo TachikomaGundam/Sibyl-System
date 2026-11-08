@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,13 +25,16 @@ import {
 const STUB = `#!/bin/sh
 # sibyl lane test stub
 case "$HOME" in
-  *"$CHECK_HOME_UNDER"*) : ;;
+  */sibyl-lane-*/*) : ;;
   *) echo "stub: HOME not under run dir: $HOME" >&2; exit 7 ;;
 esac
 printf '{"type":"step_start","timestamp":1,"sessionID":"ses_stub12345","part":{"type":"step-start"}}\\n'
-if [ -n "$STUB_ARTIFACT" ]; then printf '## section\\npartial-before-sleep\\n' > "$STUB_ARTIFACT"; fi
+printf '## section\\npartial-before-sleep\\n' > "$HOME/../draft.md"
 printf '{"type":"text","timestamp":2,"sessionID":"ses_stub12345","part":{"type":"text","text":"hello"}}\\n'
-if [ -n "$STUB_SLEEP" ]; then sleep "$STUB_SLEEP"; fi
+case "$*" in
+  *sleep-30*) sleep 30 ;;
+  *sleep-1*) sleep 1 ;;
+esac
 if [ -n "$STUB_MAKE_DB" ]; then printf 'dbbytes' > "$OPENCODE_DB"; fi
 exit 0
 `;
@@ -62,6 +65,8 @@ test("extractSessionId: first ses_ id wins; absent is null", () => {
 
 test("prepareRoleHome: dirs + copied config + pinned env (L1 shape)", async (t) => {
   const cfg = await fixture(t, "prep");
+  process.env.SIBYL_TEST_SECRET_CANARY = "must-not-reach-role";
+  t.after(() => delete process.env.SIBYL_TEST_SECRET_CANARY);
   await writeFile(cfg.configSource, '{"provider":{}}\n', "utf8");
   const { paths, env } = await prepareRoleHome(cfg, "pro");
   assert.ok(existsSync(paths.workspace));
@@ -70,6 +75,7 @@ test("prepareRoleHome: dirs + copied config + pinned env (L1 shape)", async (t) 
   assert.equal(env.OPENCODE_DB?.startsWith(join(cfg.runDir, "pro")), true, "db path is inside the run dir");
   assert.equal(env.OPENCODE_DISABLE_AUTOUPDATE, "1");
   assert.equal(env.PATH, "/usr/bin:/bin");
+  assert.equal(env.SIBYL_TEST_SECRET_CANARY, undefined, "host secrets never reach a role process");
   const copied = await readFile(join(paths.home, ".config", "opencode", "opencode.jsonc"), "utf8");
   assert.match(copied, /provider/);
   // missing config source stays tolerated
@@ -78,12 +84,19 @@ test("prepareRoleHome: dirs + copied config + pinned env (L1 shape)", async (t) 
   assert.ok(existsSync(r2.paths.home));
 });
 
+test("prepareRoleHome: role workspace denies bash despite a permissive host config", async (t) => {
+  const cfg = await fixture(t, "tool-policy");
+  await writeFile(cfg.configSource, '{"permission":{"bash":"allow"},"provider":{}}\n', "utf8");
+
+  const { paths } = await prepareRoleHome(cfg, "evidence");
+  const overlay = JSON.parse(await readFile(join(paths.workspace, "opencode.jsonc"), "utf8")) as {
+    permission: { bash: string };
+  };
+  assert.equal(overlay.permission.bash, "deny");
+});
+
 test("launchRole end-to-end with stub env: transcript, sessionId, rc=0, config copy, db collect", async (t) => {
   const cfg = await fixture(t, "e2e");
-  process.env.CHECK_HOME_UNDER = "/sibyl-lane-e2e-"; // stub self-check prefix (unique tmp prefix)
-  t.after(() => {
-    delete process.env.CHECK_HOME_UNDER;
-  });
   const outcome = await launchRole(cfg, "pro", {
     title: "sibyl-test-pro",
     modelId: "local-qwen/m",
@@ -102,19 +115,10 @@ test("launchRole end-to-end with stub env: transcript, sessionId, rc=0, config c
 
 test("launchRole: timeout kills the whole group; PARTIAL artifact survives (L5/L6 inputs)", async (t) => {
   const cfg = await fixture(t, "timeout");
-  process.env.CHECK_HOME_UNDER = "/sibyl-lane-timeout-";
-  const art = join(cfg.runDir, "pro", "draft.md");
-  await mkdir(join(cfg.runDir, "pro"), { recursive: true });
-  process.env.STUB_SLEEP = "30";
-  process.env.STUB_ARTIFACT = art;
-  t.after(() => {
-    delete process.env.CHECK_HOME_UNDER;
-    delete process.env.STUB_SLEEP;
-    delete process.env.STUB_ARTIFACT;
-  });
+  const art = join(cfg.runDir, "con", "draft.md");
   const t0 = Date.now();
   const outcome = await launchRole(cfg, "con", {
-    title: "sibyl-test-con",
+    title: "sibyl-test-con-sleep-30",
     modelId: "local-qwen/m",
     message: "go",
     timeoutMs: 1_500,
@@ -129,18 +133,12 @@ test("launchRole: timeout kills the whole group; PARTIAL artifact survives (L5/L
 
 test("killRole: pidfile-only kill; missing pidfile is a refusal, never a search", async (t) => {
   const cfg = await fixture(t, "kill");
-  process.env.CHECK_HOME_UNDER = "/sibyl-lane-kill-";
-  process.env.STUB_SLEEP = "30";
-  t.after(() => {
-    delete process.env.CHECK_HOME_UNDER;
-    delete process.env.STUB_SLEEP;
-  });
   const noPid = await killRole(cfg, "judge");
   assert.ok(!noPid.ok);
   assert.match(noPid.reason ?? "", /refusing to search/);
 
   const running = launchRole(cfg, "judge", {
-    title: "sibyl-test-judge",
+    title: "sibyl-test-judge-sleep-30",
     modelId: "local-qwen/m",
     message: "go",
     timeoutMs: 60_000,
@@ -178,6 +176,9 @@ test("composeSandboxArgs: ro root, dev, tmpfs masks, then keep rebinds (dir-pare
   assert.equal(argv[0], "/usr/bin/bwrap");
   const j = (tok: string): number => argv.indexOf(tok);
   assert.ok(j("--ro-bind") < j("--dev"), "root read-only before anything");
+  assert.ok(j("--unshare-user") < j("--ro-bind"), "sandbox has a separate user namespace");
+  assert.ok(j("--unshare-pid") < j("--proc"), "sandbox has a private pid namespace and procfs");
+  assert.equal(j("--unshare-net"), -1, "model roles retain the configured provider network path");
   assert.ok(j("--tmpfs") < j("--dir"), "masks applied before keeps");
   const keep = j("--dir");
   assert.equal(argv[keep], "--dir");
@@ -203,18 +204,40 @@ test("launchRole sandbox preflight: missing bwrap falls back to direct spawn and
   assert.equal(out.rc, 0);
 });
 
+test("launchRole: required sandbox refuses without spawning when bwrap is absent", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-sbx-required-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const marker = join(dir, "spawned");
+  const stub = join(dir, "should-not-run.sh");
+  await writeFile(stub, `#!/bin/sh\nprintf spawned > ${marker}\n`, "utf8");
+  await chmod(stub, 0o755);
+  const out = await launchRole(
+    {
+      runDir: join(dir, "run"),
+      opencodeBin: stub,
+      configSource: "",
+      sandboxMaskDirs: ["/some/where"],
+      bwrapBin: join(dir, "no-such-bwrap"),
+      requireSandbox: true,
+    },
+    "evidence",
+    { title: "x", modelId: "p/m", message: "hi", timeoutMs: 5_000 },
+  );
+  assert.equal(out.ok, false);
+  assert.equal(out.sandboxed, false);
+  assert.match(out.error ?? "", /sandbox required.*bwrap/i);
+  assert.equal(existsSync(marker), false);
+});
+
 // --- SALVAGE grace (wound 20261104): deadline passes but the work completes -> keep it.
 //     Grace also exhausted -> SIGKILL and timedOut stay loud. Fail-closed unchanged.
 
 test("salvage: role finishing after its deadline inside grace is KEPT and disclosed", async (t) => {
   const fx = await fixture(t, "salvage-keep");
-  process.env.STUB_SLEEP = "1";
-  t.after(() => { delete process.env.STUB_SLEEP; });
   const outcome = await launchRole(
     { runDir: fx.dir, opencodeBin: fx.stub, configSource: "" },
     "pro",
-    { title: "t", modelId: "p/m", message: "go", timeoutMs: 400, salvageGraceMs: 8_000 },
-    // STUB_SLEEP via env: fixture's stub sleeps $STUB_SLEEP seconds
+    { title: "sleep-1", modelId: "p/m", message: "go", timeoutMs: 400, salvageGraceMs: 8_000 },
   );
   // (stub sleeps 1s > 400ms deadline, < 8s grace, exits 0)
   assert.equal(outcome.timedOut, false);
@@ -224,12 +247,10 @@ test("salvage: role finishing after its deadline inside grace is KEPT and disclo
 
 test("salvage: grace exhausted still kills loudly with timedOut=true", async (t) => {
   const fx = await fixture(t, "salvage-kill");
-  process.env.STUB_SLEEP = "30";
-  t.after(() => { delete process.env.STUB_SLEEP; });
   const outcome = await launchRole(
     { runDir: fx.dir, opencodeBin: fx.stub, configSource: "" },
     "con",
-    { title: "t", modelId: "p/m", message: "go", timeoutMs: 300, salvageGraceMs: 400 },
+    { title: "sleep-30", modelId: "p/m", message: "go", timeoutMs: 300, salvageGraceMs: 400 },
   );
   assert.equal(outcome.timedOut, true);
   assert.equal(outcome.ok, false);
