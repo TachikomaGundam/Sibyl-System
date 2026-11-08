@@ -5,6 +5,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [1.6.4] - 2026-11-08
+
+### Fixed
+- **Portable role containment.** Non-Linux role launches now require the credential
+  relay instead of inheriting host provider credentials; Windows role homes use
+  Windows profile variables and timeout termination targets the child process.
+- **Release documentation.** The README now documents the chamber-ledger override,
+  correct proxy origins and endpoint set, portable containment, complete CLI examples,
+  and npm-safe source links.
+
+## [1.6.3] - 2026-11-07
+
+### Added
+- **Credential proxy for isolated roles.** An optional loopback relay now keeps
+  upstream provider credentials in the trusted runner. Roles receive scoped,
+  quota-limited tokens and a synthesized provider-only config; their host
+  OpenCode config and environment credentials no longer cross the isolation
+  boundary when `credentialProxy` is enabled.
+
+### Fixed
+- **Isolated role containment.** Required chamber sandboxes now use separate
+  namespaces and a minimal environment; agent-controlled shell and web tools
+  are denied. Failed Swarm draft writes cannot produce an approval, repeated
+  CLI `--scenario` options retain every path, and invalid launch inputs no
+  longer leave stale run directories.
+
+### Changed
+- README now documents credential-proxy configuration, migration, and the
+  remaining local-account and unsandboxed-venue boundary.
+
 ## [1.6.2] - 2026-11-05
 
 ### Fixed
