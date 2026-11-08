@@ -14,6 +14,11 @@
 #   failure "receipt on disk, absent inside the tag". The tag object IS the
 #   release; if the fact is not in it, the fact does not exist for this gate.
 #
+# W5 (2026-11-08, owner-ordered cure of the v1.6.4 stranding class): the tag's
+#   commit must already be contained in the remote's main branch — release PR
+#   lands first, tag second, so the S1 witness (main-branch, exact-sha) can
+#   always reach the release. Network failure = refusal (fail-closed).
+#
 # Receipt  : docs/release/<version>.md inside the tag object
 #            (tree-relative dir override: SIBYL_RELEASE_RECEIPT_DIR)
 #            must contain a line starting with:  gate: PASS
@@ -83,6 +88,27 @@ police_name() { # $1=ref name to police, $2=pushed oid
       block "tag $ver message body contains an email-address shape (rule tag-body-email) — the pushed tag is public; identities ride the tagger field, not the message"
     fi
   fi
+  # W5 (2026-11-08, cure for the v1.6.4 stranding class — owner-ordered 治本):
+  # the released commit must ALREADY be contained in the remote's main branch.
+  # Rationale: the publish gate S1 only accepts audit witnesses from main at
+  # the exact release sha; a tag cut before its commit lands on main can never
+  # be witnessed there (main tip differs), and tag-protection rules then pin
+  # the stranded tag forever — that is exactly how v1.6.4 died. Law: land the
+  # release PR first, then cut the tag. The merge method (merge commit / squash
+  # / rebase) stops mattering: whatever lands is what gets tagged. Fail-closed:
+  # unreachable remote, no main, or a failed fetch all refuse the push.
+  # Ref-tag deletions never reach this check (zero-oid return above).
+  commit_oid="$(git rev-parse --verify "${oid}^{commit}" 2>/dev/null)" \
+    || block "W5: tag $ver -> $remote: pushed object does not peel to a commit — containment unverifiable, refusing"
+  if ! git ls-remote --exit-code "$remote" refs/heads/main >/dev/null 2>&1; then
+    block "W5: remote $remote has no refs/heads/main or is unreachable — release containment unverifiable, refusing"
+  fi
+  git fetch -q "$remote" refs/heads/main \
+    || block "W5: fetching $remote refs/heads/main failed — containment unverifiable, refusing (fail-closed)"
+  main_tip="$(git rev-parse --verify "FETCH_HEAD^{commit}" 2>/dev/null)" \
+    || block "W5: fetched $remote main tip unreadable — refusing"
+  git merge-base --is-ancestor "$commit_oid" "$main_tip" \
+    || block "tag $ver points at a commit NOT contained in $remote/main ($main_tip) — W5 stranding class: land the release PR first, then cut the tag"
 }
 
 while read -r local_ref local_oid remote_ref remote_oid; do
