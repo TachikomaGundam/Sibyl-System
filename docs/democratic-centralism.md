@@ -62,7 +62,7 @@ canary 挂 = 一票否决（REJECT + CANARY-VETO），不靠考生自供，靠�
 ## 6. 使用
 
 ```
-node src/cli.ts run --target doc.md --goal "Is it sound?" --model local-qwen/qwen3.8-flash-next
+node src/cli.ts run --target doc.md --goal "Is it sound?" --model your-provider/your-model
 node src/cli.ts status --run-id <id>
 node src/cli.ts spotcheck <runId>      # 打印人类可粘贴的字节级验证命令
 node src/cli.ts kill <runDir> <role>   # 只认 pidfile 数字（L4）

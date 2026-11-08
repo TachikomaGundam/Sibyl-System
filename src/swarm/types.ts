@@ -39,7 +39,7 @@ export type ModelSlot = {
   modelID: string;
 };
 
-/** Named model pool (kimi-code `[secondary_model]` analog); resolved at MINT. */
+/** Named model pool (external-agent config analog); resolved at MINT. */
 export type ModelPool = Record<string, ModelSlot>;
 
 // --- PLAN stage -------------------------------------------------------------
