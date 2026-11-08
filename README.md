@@ -62,16 +62,24 @@ NEEDS_HUMAN). Internal dissent is preserved by path+hash in the sealed run
 dir, never dumped outward. All role sessions run isolated under /tmp (zero
 sessions in your main list); runs are spotcheckable
 (`sha256sum -c CHECKSUMS.txt`) and append-only-ledgered.
-Laws: docs/isolation-laws.md. Mechanism: docs/democratic-centralism.md.
+Laws and mechanism: https://github.com/TachikomaGundam/Sibyl-System/tree/main/docs.
 
 ```
-node dist/cli.js run --target doc.md --goal "Is this sound?" --model your-provider/your-model
-node dist/cli.js status --tail 5
-node dist/cli.js spotcheck <runId>
-node dist/cli.js run --target - --profile exam --scenario scenarios/<id>.json ...  # behavioral exam venue (a venue self-check must pass before any exam run)
+sibyl-chamber run --target doc.md --goal "Is this sound?" --model your-provider/your-model
+sibyl-chamber status --tail 5
+sibyl-chamber spotcheck <runDir|runId>
+sibyl-chamber kill <runDir> <role>
+sibyl-chamber run --target - --goal "Evaluate candidate behavior" --profile exam --model your-provider/your-model --scenario scenarios/<id>.json
 ```
 
 ## Install
+
+### Requirements
+
+Use the Node version declared by `package.json` `engines`. Linux with
+Bubblewrap provides hardened filesystem containment. macOS and Windows use
+portable containment only with `credentialProxy`; it protects credentials but
+does not stop artifacts reading files accessible to the runner account.
 
 Register the published npm package by name (opencode resolves it from npm):
 
@@ -107,8 +115,8 @@ sources with Bun). The tuple's second element is passed **verbatim** as the
 options object, so option fields sit at its **top level** (as in the example);
 unknown keys are rejected loudly, never silently ignored. The options object is
 the **only** config surface — there are no other config files (the
-`SIBYL_STATE_FILE` env var exists solely as a test/CI isolation seam, see
-State).
+  `SIBYL_STATE_FILE` and `SIBYL_CHAMBER_LEDGER` env vars exist solely as
+  explicit test/CI isolation seams, see State).
 
 Invalid options never crash the host: the plugin prints
 `[sibyl] SIBYL plugin DISABLED — fix options (no sibyl_* tools registered)` to
@@ -172,12 +180,12 @@ your host `configSource`, and it never receives the upstream API key.
     "credentialProxy": {
       "providers": {
         "review-gateway": {
-          "baseUrl": "https://gateway.example.com/v1",
+          "baseUrl": "https://gateway.example.com",
           "keyFile": "/home/you/.config/sibyl/review-gateway.key",
           "models": ["review-model"]
         },
         "local": {
-          "baseUrl": "http://127.0.0.1:8000/v1",
+          "baseUrl": "http://127.0.0.1:8000",
           "keyless": true,
           "models": ["local-review"]
         }
@@ -192,8 +200,10 @@ your host `configSource`, and it never receives the upstream API key.
 tree with owner-only permissions. `keyEnv` is supported for an already managed
 runner secret, but Sibyl reads it only at relay startup; it never propagates to
 role processes. `keyless: true` is for local OpenAI-compatible servers that do
-not require authentication. The relay accepts only OpenAI-compatible model and
-completion endpoints, rejects redirects, applies the role quota, and records
+not require authentication. `baseUrl` is the upstream origin; the relay adds
+the request path. It permits POST `/v1/chat/completions`, `/v1/completions`,
+`/v1/embeddings`, `/v1/responses`, and GET `/v1/models` or `/v1/models/*`.
+All other paths return 404. The relay rejects redirects, applies the role quota, and records
 sanitized request receipts in the run directory. It does not log request bodies,
 authorization headers, upstream keys, or role tokens.
 
@@ -217,9 +227,8 @@ model defaults shipped are empty-string sentinels (= "host default") and the
 generic `local-` seating prefix. Concrete provider/model ids live exclusively
 in **your** config — the registration tuple's options object (per-operator
 `modelPool` / `modelPolicy` / `--model` flag). Operators on shared fleets
-conventionally keep the concrete values in an operator-local file (e.g.
-`operator/release.env`, key `HISTORIAN_TRANSLATE_MODEL=<provider/model>`) that
-their own shell/opencode config feeds into that options object at registration
+conventionally keep concrete values in an operator-local file that their own
+shell or OpenCode configuration feeds into that options object at registration.
 time; that file sits outside the package boundary — `package.json` `files`
 ships only `dist/`, `README.md`, `LICENSE`, and ship.sh gate 5a fails the
 release if anything else appears in the tarball. `./ship.sh` additionally
@@ -244,11 +253,9 @@ default `/tmp`, defined under Options) — sealed per-run directories there.
   atomically (tmp + rename; the parent directory is created on demand).
 - **Per-run space**: `~/.sibyl/spaces/<runId>/` (Windows: `%USERPROFILE%\.sibyl\spaces`) — full voter replies
   (`MELCHIOR.md`, …) for consults, worker drafts (`<workerId>.draft.md`) for swarms.
-- **Test/CI override**: the `SIBYL_STATE_FILE` env var points **the runs file**
-  at a custom path (its scope is exactly that file — the chamber ledger and
-  `spaces/` keep their real paths, since the ledger is the audit trail and is
-  deliberately not silently relocatable; CI runners get a fresh home dir
-  anyway).
+- **Test/CI overrides**: `SIBYL_STATE_FILE` points the runs file at a custom
+  path. `SIBYL_CHAMBER_LEDGER` explicitly points the append-only chamber ledger
+  at another path. Neither setting is implicit; use both in isolated CI runs.
 - `load()` never throws: a missing or corrupt runs file recovers to an empty
   list (with a stderr warning) and the next write replaces the corrupt file —
   so if run history matters, back up `~/.sibyl`; the chamber ledger is a
@@ -316,7 +323,7 @@ where it applies, in the Release process section at the end of this document.
 
 ## Security notes
 
-See **[SECURITY.md](SECURITY.md)** for the disclosure channel (private GitHub
+See **[SECURITY.md](https://github.com/TachikomaGundam/Sibyl-System/blob/main/SECURITY.md)** for the disclosure channel (private GitHub
 advisory), the full data-egress map, and the honestly-named limitations.
 Summary:
 
@@ -340,7 +347,7 @@ Summary:
   judgment table and the operative defaults are locked together in
   `test/publish-gate.test.ts`, which imports the defaults from
   `scripts/publish-gate.mjs`). Honest status ledger of every vector,
-  open or closed: [OPEN-VECTORS.md](OPEN-VECTORS.md).
+   open or closed: [OPEN-VECTORS.md](https://github.com/TachikomaGundam/Sibyl-System/blob/main/OPEN-VECTORS.md).
 - Engine sessions this product spawns are retained under bounded ages
   (`npm run reap`, dry-run by default; audit conveners >= 90 days per owner
   ruling, reconciliation data preserved in the sealed manifest).
