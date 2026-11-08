@@ -149,9 +149,66 @@ defaults.
 | `timeoutMs` | `240000` | Per-child-session timeout (create + prompt share the budget). Integer ≥ 1. |
 | `concurrencyK` | `4` | Cap on parallel workers per wave (also capped by the schema's own `concurrency`). Integer 1–8. |
 | `staggerMs` | `2000` | Delay between worker launches within a wave, to avoid rate-limit bursts. Integer ≥ 0. |
-| `lane` | see below | Isolated-lane mechanics for `sibyl_review` / `sibyl-chamber` (`src/lane/isolated.ts`). Sub-keys: `runRoot` (string, default `"/tmp"`) — parent dir for run dirs; `opencodeBin` (non-empty string; discovery order: `$OPENCODE_BIN` → `~/.local/bin/opencode` → `/usr/local/bin/opencode` → `/usr/bin/opencode` → bare PATH name `"opencode"`; never empty, a wrong guess fails loud at spawn naming the bin) — the binary launched for each isolated role; `configSource` (default `~/.config/opencode/opencode.jsonc`) — **read-copied** into each role home, never written back; `roleTimeoutMs` (integer ≥ 5000, default `1200000`) — per-role wall-clock budget; `roleSalvageGraceMs` (integer ≥ 0, default `900000`) — grace window after the deadline: a role still finishing within grace is kept and disclosed (`SALVAGED … past its deadline` on the ledger/notes, verdict demoted through the normal gap channel); grace exhausted still SIGKILLs with timedOut=true, so a hung role dies — fail-closed unchanged; `examMaskDirs` (array of absolute paths, default `[]`) — dirs tmpfs-masked from exam candidates (grader files, other runs); empty = an unsandboxed venue that says so plainly in its final report. |
+| `lane` | see below | Isolated-lane mechanics for `sibyl_review` / `sibyl-chamber` (`src/lane/isolated.ts`). Sub-keys: `runRoot` (string, default `"/tmp"`) — parent dir for run dirs; `opencodeBin` (non-empty string; discovery order: `$OPENCODE_BIN` → `~/.local/bin/opencode` → `/usr/local/bin/opencode` → `/usr/bin/opencode` → bare PATH name `"opencode"`; never empty, a wrong guess fails loud at spawn naming the bin) — the binary launched for each isolated role; `configSource` (default `~/.config/opencode/opencode.jsonc`) — read-copied only when `credentialProxy` is absent, never written back; `roleTimeoutMs` (integer ≥ 5000, default `1200000`) — per-role wall-clock budget; `roleSalvageGraceMs` (integer ≥ 0, default `900000`) — grace window after the deadline: a role still finishing within grace is kept and disclosed (`SALVAGED … past its deadline` on the ledger/notes, verdict demoted through the normal gap channel); grace exhausted still SIGKILLs with timedOut=true, so a hung role dies — fail-closed unchanged; `examMaskDirs` (array of absolute paths, default `[]`) — dirs tmpfs-masked from exam candidates (grader files, other runs); empty = an unsandboxed venue that says so plainly in its final report. |
 | `modelPolicy` | `{ allowedPrefixes: ["local-"] }` | Model seating allow-list: only pool models whose `providerID/modelID` starts with one of these prefixes may take a seat; everything else is denied at launch. Array of non-empty strings, **at least 1 entry** (an empty list is rejected as a deny-everything typo). Set this to your own machine's providers — the shipped default is a prefix pattern, not a specific model. |
+| `credentialProxy` | absent | Optional loopback credential relay for isolated roles. When configured, every seated provider must appear in `providers`; Sibyl refuses an undeclared seat rather than falling back to host config. Each provider declares `baseUrl`, exactly one of `keyFile`, `keyEnv`, or `keyless: true`, optional OpenAI-compatible `npm`, and allowed `models`. `maxRequestsPerRole` defaults to `2000`. |
 | `chamber` | see below | Review-chamber seats and rounds. Sub-keys: `maxRounds` (integer 1–8, default `3`) — clash/cross-critique round cap; `roles` (`{ evidence, pro, con, judge }` → pool slot names, each default `"default"`); `judgePool` (non-empty array of slot names, default `["default"]`) — the slots the independent judge may be drawn from (the pool and draw seed are recorded before launch). |
+
+### Credential proxy for isolated roles
+
+Use `credentialProxy` when review or exam roles may run untrusted artifacts or
+prompts. Sibyl starts a loopback-only relay for the run, reads each provider key
+once in the trusted runner, and gives each role a short-lived scoped token. The
+role receives a synthesized provider-only OpenCode config: it does **not** copy
+your host `configSource`, and it never receives the upstream API key.
+
+```jsonc
+{
+  "plugin": [["sibyl-system", {
+    "modelPool": {
+      "default": { "providerID": "review-gateway", "modelID": "review-model" }
+    },
+    "modelPolicy": { "allowedPrefixes": ["review-gateway/"] },
+    "credentialProxy": {
+      "providers": {
+        "review-gateway": {
+          "baseUrl": "https://gateway.example.com/v1",
+          "keyFile": "/home/you/.config/sibyl/review-gateway.key",
+          "models": ["review-model"]
+        },
+        "local": {
+          "baseUrl": "http://127.0.0.1:8000/v1",
+          "keyless": true,
+          "models": ["local-review"]
+        }
+      },
+      "maxRequestsPerRole": 2000
+    }
+  }]]
+}
+```
+
+`keyFile` is the recommended production option. Store it outside the project
+tree with owner-only permissions. `keyEnv` is supported for an already managed
+runner secret, but Sibyl reads it only at relay startup; it never propagates to
+role processes. `keyless: true` is for local OpenAI-compatible servers that do
+not require authentication. The relay accepts only OpenAI-compatible model and
+completion endpoints, rejects redirects, applies the role quota, and records
+sanitized request receipts in the run directory. It does not log request bodies,
+authorization headers, upstream keys, or role tokens.
+
+Migration is opt-in: adding `credentialProxy` changes isolated roles from
+host-config copies to proxy-only configuration. Add every provider a role can
+use before enabling it; an omitted provider fails the run before the role
+launches. First test against a revocable/non-production credential, then rotate
+any key that was previously exposed to role environments.
+
+The role sandbox blocks agent-controlled shell and web tools and uses isolated
+namespaces, but it retains normal model-provider connectivity through the
+loopback relay. The relay is a credential boundary, not a destination-level
+network firewall. A hostile local user sharing the runner account, or an
+unsandboxed exam venue, is outside this boundary; use a dedicated OS account or
+container for those threat models.
 
 ### Portability (release principle)
 
