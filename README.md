@@ -1,5 +1,7 @@
 # Sibyl-System
 
+> Read this page in another language: [English](README.md) · [Chinese](docs/README.zh.md)
+
 [![npm version](https://img.shields.io/npm/v/sibyl-system.svg)](https://www.npmjs.com/package/sibyl-system) ![license MIT](https://img.shields.io/badge/license-MIT-green.svg)
 
 A standalone [opencode](https://opencode.ai) plugin that adds independent,
@@ -50,7 +52,7 @@ on success** (the reply files are the durable record; failed votes keep their
 DB rows for salvage). `sibyl_review` roles run fully isolated under /tmp with
 their own HOME/DB (`src/lane/isolated.ts`), never touching yours.
 
-## The review chamber (民主集中制)
+## The review chamber (democratic centralism)
 
 The name is the design: broad internal deliberation, one unified external
 voice. `sibyl_review` + `sibyl-chamber` is a GENERAL review apparatus: any
