@@ -39,7 +39,7 @@ Authoritative per-release detail lives in the release packets under `docs/releas
 
 ### Fixed
 - **Chamber runs can no longer die without a record** (wound
-  `docs/wound-chamber-dead-without-record-20261104.md`, run
+  2026-11-04 dead-without-record, run
   sibyl-20261102T133505Z-4393): the review tool now captures the detached
   runner's stdout/stderr into `startup.log` inside the run dir; the CLI entry
   carries a fatal boundary writing `startup-error.json` on any uncaught
@@ -50,7 +50,7 @@ Authoritative per-release detail lives in the release packets under `docs/releas
   No fail-closed property changed; release (version/tag/publish) stays a
   human gate.
 - **Chamber role timeout no longer sits below the measured heavy-role band** (wound
-  `docs/wound-role-timeout-below-measured-20261104.md`, runs sibyl-20261104T094318Z-2421 /
+  2026-11-04 role-timeout-below-measured, runs sibyl-20261104T094318Z-2421 /
   -094434Z-42db / -094437Z-0a9c / -100648Z-8ed1): `lane.roleTimeoutMs` defaulted to 600s
   while the engine documents heavy ballots finishing 500-700s under load, so one legitimate
   heavy role call timed the whole session out before the judge entered. New named default

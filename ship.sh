@@ -25,6 +25,9 @@ ROOT=$(pwd)
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'SHIP FAIL: %s\n' "$*" >&2; exit 1; }
 
+say "0/5 workdoc guard (R0: internal ledgers never tracked here)"
+node scripts/workdoc-guard.mjs
+
 say "1/5 typecheck"
 npm run --silent typecheck
 
