@@ -30,6 +30,16 @@ jobs:
       # 2026-11-02). Pinned exact: updates happen only via reviewed commits
       # (this file is gate-territory; dependabot does not float this constant).
       - run: npm install -g --ignore-scripts npm@11.21.1
+      - name: wall clock for the causal tie (H1)
+        # 2026-11-12 first-real-run defect: `github.run_started_at` is not a
+        # workflow context property — it rendered EMPTY on the v2.0.0 publish
+        # (run 43253933134) and publish-gate fail-closed on the unparseable
+        # value, exactly as its law demands. The unit tests always fed env
+        # directly, so the expression itself was never exercised until then.
+        # The job-start clock is at-or-after the run start the original design
+        # intended, so the default-branch causal branch stays equal-or-tighter.
+        id: clock
+        run: echo "ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: supply-chain liveness gate (S1/S2) + release-day auto-witness (H1)
         # Auto-witness (council-2-alt, 2026-11-08): the tag push above also
         # triggered scheduled-audit.yml on THIS commit; the gate now WAITS for
@@ -46,7 +56,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ github.sha }}
           TAG_REF: ${{ github.ref_name }}
-          TAG_REF_CREATED_AT: ${{ github.run_started_at }}
+          TAG_REF_CREATED_AT: ${{ steps.clock.outputs.ts }}
         run: node scripts/publish-gate.mjs --workflow scheduled-audit.yml --poll-seconds=30 --wait-minutes=20
       - run: npm ci --ignore-scripts
       - run: ./ship.sh
