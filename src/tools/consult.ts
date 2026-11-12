@@ -13,7 +13,9 @@
 import { join } from "node:path";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 
 import { COUNCILORS, tallyVotes } from "../council/index.ts";
 import type { CouncilorId, CouncilVote } from "../council/index.ts";
@@ -148,17 +150,18 @@ async function safeWrite(path: string, text: string): Promise<string> {
 }
 
 export function buildConsultTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: CONSULT_TOOL_NAME,
     description:
       "SIBYL council consult: audit an artifact (file path or inline multi-line text, max 256 KiB) with the three " +
       "councilor personas (MELCHIOR/BALTHASAR/CASPER) in parallel and return the fail-closed 2/3 verdict " +
       "(APPROVE / REJECT / CANNOT_ANSWER when error or missing seats left no decision) plus reasons, must-fix " +
       "items, run id, and per-voter reply files.",
     args: {
-      artifact: tool.schema.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
-      goal: tool.schema.string().min(1).describe("What the artifact is supposed to achieve."),
+      artifact: z.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
+      goal: z.string().min(1).describe("What the artifact is supposed to achieve."),
     },
-    execute: async (args, context) => {
+    core: async (args, context) => {
       try {
         return await consultExecute(deps, args, context);
       } catch (err) {

@@ -19,7 +19,7 @@ function mk(rows: unknown[], withMessages = true): ToolDeps {
   const client = {
     session: { ...(messages !== undefined ? { messages } : {}) },
   } as unknown as EngineClient;
-  return { client, store: {} as ToolDeps["store"], options: {} as ToolDeps["options"] };
+  return { client, store: {} as ToolDeps["store"], options: {} as ToolDeps["options"], resolveDirectory: async () => "/sibyl-test" };
 }
 
 const ctx = { directory: "/tmp/x", abort: new AbortController().signal, sessionID: "ses_caller" };

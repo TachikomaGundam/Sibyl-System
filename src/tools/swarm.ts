@@ -13,7 +13,9 @@
 import { join } from "node:path";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 
 import { deadFaceCount, deadWithoutRecord, parseTerminalRows } from "../terminal.ts";
 
@@ -58,17 +60,18 @@ export function parseJudgeWord(text: string): SwarmVerdict | null {
 }
 
 export function buildSwarmTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: SWARM_TOOL_NAME,
     description:
       "SIBYL swarm: decompose a goal+artifact (file path or inline multi-line text, max 256 KiB) with the ARCHITECT " +
       "persona into a dependency-wave workflow, run rotated councilor workers over it, and report the aggregated " +
       "verdict, per-task statuses, and draft artifact paths. Optional single judge pass when judge=true.",
     args: {
-      artifact: tool.schema.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
-      goal: tool.schema.string().min(1).describe("What the swarm must produce or settle."),
-      judge: tool.schema.boolean().optional().describe("Run the optional judge persona over the derived report (default: derived verdict only)."),
+      artifact: z.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
+      goal: z.string().min(1).describe("What the swarm must produce or settle."),
+      judge: z.boolean().optional().describe("Run the optional judge persona over the derived report (default: derived verdict only)."),
     },
-    execute: async (args, context) => {
+    core: async (args, context) => {
       try {
         return await swarmExecute(deps, args, context);
       } catch (err) {

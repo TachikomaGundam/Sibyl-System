@@ -10,7 +10,9 @@
 
 import { createHash } from "node:crypto";
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 
 import { consultExecute } from "./consult.ts";
 import { internalError, readArtifact } from "./shared.ts";
@@ -32,7 +34,8 @@ async function artifactHash(raw: string, dir: string): Promise<string | null> {
 }
 
 export function buildAuditTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: AUDIT_TOOL_NAME,
     description:
       "SIBYL independent audit lane: convenes the three-councilor consult from a FRESH engine-provisioned " +
       "root session (structurally non-kin to any drafting chain), so the ballot enters the effective path " +
@@ -41,10 +44,10 @@ export function buildAuditTool(deps: ToolDeps) {
       "face. REFUSES (no receipt) if the " +
       "fresh convener resolves to anything but INDEPENDENT, or the artifact drifts mid-ballot (VOID).",
     args: {
-      artifact: tool.schema.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
-      goal: tool.schema.string().min(1).describe("The question the audit must answer."),
+      artifact: z.string().min(1).describe("Path to the artifact, or its inline content (multi-line)."),
+      goal: z.string().min(1).describe("The question the audit must answer."),
     },
-    execute: async (args, context) => {
+    core: async (args, context) => {
       try {
         return await auditExecute(deps, args, context);
       } catch (err) {

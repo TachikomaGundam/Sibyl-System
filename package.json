@@ -1,6 +1,6 @@
 {
   "name": "sibyl-system",
-  "version": "1.6.5",
+  "version": "2.0.0",
   "license": "MIT",
   "type": "module",
   "description": "Sibyl-System: democratic-centralism review chamber (one conclusion, one voice) + fail-closed council voting + dynamic swarm plugin for OpenCode",
@@ -37,7 +37,6 @@
     "reap": "node --no-warnings scripts/session-reap.mjs"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "1.19.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -47,12 +46,6 @@
   },
   "bin": {
     "sibyl-chamber": "./dist/cli.js"
-  },
-  "overrides": {
-    "toml": "5.0.1",
-    "@opencode-ai/plugin": {
-      "zod": "4.6.7"
-    }
   },
   "engines": {
     "node": ">=22"

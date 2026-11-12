@@ -11,7 +11,9 @@
 // later re-run against a mutated store shows up as a view-hash difference.
 // This is the read primitive; ledgering the receipt stays with the caller.
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 import { createHash } from "node:crypto";
 
 import { internalError } from "./shared.ts";
@@ -135,18 +137,19 @@ export async function anchorExecute(
 }
 
 export function buildAnchorTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: ANCHOR_TOOL_NAME,
     description:
       "SIBYL anchor check (g12b-3 primitive): verify a claimed human message (order/approval) " +
       "against the engine session store — closed verdict MATCH/MISMATCH/ABSENT/ERROR plus a " +
       "view-hash receipt so the read itself is re-computable. Read-only; persists nothing.",
     args: {
-      sessionId: tool.schema.string().min(1).describe("Engine session id that allegedly contains the human message."),
-      index: tool.schema.number().int().optional().describe("Message ordinal in the SDK messages view (0-based; negative counts from the end; default last). WARNING: this ordinal space differs from the raw message table — cross-tool identity is the body hash, not the ordinal."),
-      body: tool.schema.string().min(1).optional().describe("Claimed exact body text — located by unique canonical match (closed normalization: trailing dcp tag + trim). Repeated bodies return ERROR naming candidates, never auto-picked."),
-      expectSha256: tool.schema.string().min(64).max(64).optional().describe("Claimed sha256 (hex) of the anchor body text; omitting it yields a non-verdict."),
-      label: tool.schema.string().min(1).optional().describe("Free-form label echoed into the receipt (e.g. the order being ratified)."),
+      sessionId: z.string().min(1).describe("Engine session id that allegedly contains the human message."),
+      index: z.number().int().optional().describe("Message ordinal in the SDK messages view (0-based; negative counts from the end; default last). WARNING: this ordinal space differs from the raw message table — cross-tool identity is the body hash, not the ordinal."),
+      body: z.string().min(1).optional().describe("Claimed exact body text — located by unique canonical match (closed normalization: trailing dcp tag + trim). Repeated bodies return ERROR naming candidates, never auto-picked."),
+      expectSha256: z.string().min(64).max(64).optional().describe("Claimed sha256 (hex) of the anchor body text; omitting it yields a non-verdict."),
+      label: z.string().min(1).optional().describe("Free-form label echoed into the receipt (e.g. the order being ratified)."),
     },
-    execute: async (args, context) => anchorExecute(deps, args, context),
+    core: async (args, context) => anchorExecute(deps, args, context),
   });
 }

@@ -69,7 +69,7 @@ async function fixture(script: Record<string, Step[]>, raw?: unknown) {
   const dir = await mkdtemp(join(tmpdir(), "sibyl-t8-swarm-"));
   const { client, prompts, creates, createCount } = scripted(script);
   const store = new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") });
-  const deps: ToolDeps = { client, store, options: opts(raw) };
+  const deps: ToolDeps = { client, store, options: opts(raw), resolveDirectory: async () => "/sibyl-test" };
   const ctx: ToolContextLike = { directory: "/sw", abort: new AbortController().signal, sessionID: "ses_caller" };
   return { deps, ctx, dir, prompts, creates, createCount, store };
 }

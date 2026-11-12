@@ -10,6 +10,17 @@ const DENY = [
   { pat: /^docs\/wound-/, why: "internal wound ledger (R0)" },
   { pat: /^docs\/HANDOFF-/, why: "internal handoff ledger (R0)" },
   { pat: /^spike\/evidence\//, why: "spike evidence logs — machine paths leak (R0)" },
+  // Scratch/cache/editor-junk classes (owner hygiene directive 2026-11-12): build
+  // residue and editor droppings are not product surfaces — they must never be
+  // tracked, no matter which tool produced them.
+  { pat: /\.log$/i, why: "run log — evidence lives outside the repo (receipt law)" },
+  { pat: /\.(bak|orig|rej|swp|tmp)$/i, why: "editor/patch leftover" },
+  { pat: /\.ipynb$/i, why: "notebook scratch — not a product surface" },
+  { pat: /(^|\/)\.pytest_cache\//, why: "interpreter cache" },
+  { pat: /(^|\/)__pycache__\//, why: "interpreter cache" },
+  { pat: /(^|\/)\.DS_Store$/, why: "device metadata" },
+  { pat: /^\.vscode\//, why: "editor workspace settings" },
+  { pat: /^\.idea\//, why: "editor workspace settings" },
 ];
 
 export function guardHits(files) {

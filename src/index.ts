@@ -1,25 +1,28 @@
 // provenance: original clean-room Sibyl-System implementation (plan task 8 — plugin
 // entry), no swarm code copied.
 //
-// The SIBYL plugin surface: seven tools registered through the SDK tool()
-// helper — sibyl_consult (fail-closed 3-persona council verdict), sibyl_swarm
-// (thin driver of the PLAN→MINT→DISPATCH→AGGREGATE pipeline), sibyl_status
-// (read-only run store + chamber ledger view), sibyl_review (v1.1 general
-// democratic-centralism chamber: any review need, one voice at terminal), and
-// the read-only audit primitives sibyl_anchor_check / sibyl_time_probe /
-// sibyl_attribute.
-// Zero external fleet-orchestration coupling by design.
+// The SIBYL plugin surface for opencode 2.x: eight tools registered through
+// ctx.tool.transform — sibyl_consult (fail-closed 3-persona council verdict),
+// sibyl_audit (blind fresh-convener audit), sibyl_swarm (thin driver of the
+// PLAN→MINT→DISPATCH→AGGREGATE pipeline), sibyl_status (read-only run store +
+// chamber ledger view), sibyl_review (v1.1 general democratic-centralism
+// chamber: any review need, one voice at terminal), and the read-only audit
+// primitives sibyl_anchor_check / sibyl_time_probe / sibyl_attribute.
+// Zero external fleet-orchestration coupling by design; zero runtime
+// dependency on the opencode SDK (structural types in src/v2/types.ts).
 //
-// Entry contract (spike/GO.md, learnings #3): a plugin that throws on load
-// fails SILENTLY inside the host — so config errors are reported LOUDLY via
-// console.error and the plugin returns an empty Hooks object instead. The one
-// RunStore and the one EngineClient adapter are constructed here and shared by
-// all seven tools (the store's RMW mutex is per-instance). Tools receive the
-// per-session directory through their execute context, never a closure.
+// Entry contract (spike/GO.md learnings #3, re-anchored for 2.x): a plugin
+// that throws on load fails SILENTLY inside the host — so config errors are
+// reported LOUDLY via console.error and setup registers NOTHING instead. The
+// one RunStore, the one EngineClient adapter, and the one session-state map
+// set are constructed here and shared by all tools (the store's RMW mutex is
+// per-instance). Tools receive the per-session directory resolved from the
+// engine's session record, never a closure.
+//
+// V2 platform wiring (docs/V2-MIGRATION.md): the persona system prompt rides
+// the session "context" hook; the voter/worker tool-gate rides the
+// "execute.before" tool hook (throw = refusal before side effects).
 
-import type { Hooks, PluginInput, PluginOptions } from "@opencode-ai/plugin";
-
-import type { EngineClient } from "./engine/index.ts";
 import { parseOptions } from "./options.ts";
 import { RunStore } from "./state/index.ts";
 import { buildConsultTool } from "./tools/consult.ts";
@@ -30,151 +33,68 @@ import { buildAttributeTool, buildTimeProbeTool } from "./tools/probes.ts";
 import { buildStatusTool } from "./tools/status.ts";
 import { buildSwarmTool } from "./tools/swarm.ts";
 import type { ToolDeps } from "./tools/shared.ts";
+import type { V2Plugin, V2ToolInfo } from "./v2/types.ts";
+import {
+  clearSessionState,
+  createSessionState,
+  gateToolEvent,
+  injectSessionSystem,
+  makeDirectoryResolver,
+  toEngineClientV2,
+} from "./v2/adapter.ts";
 
-/**
- * Adapt the real SDK client to the engine's structural EngineClient seam.
- * The SDK returns `{data, error, request, response}` unions whose inactive
- * arm carries REQUIRED `data: undefined` / `error: undefined` keys; under
- * exactOptionalPropertyTypes those are NOT assignable to EngineClient's
- * optional-bag returns (proved by .omo/evidence/t8/assign-probe.ts), so every
- * call is normalized through conditional spreads here. Request params need no
- * translation: v1.15.13 types.gen prompt path is `{ id: string }`, matching
- * the runtime (learnings #1).
- */
-export function toEngineClient(sdk: PluginInput["client"]): EngineClient {
-  return {
-    session: {
-      async delete(args) {
-        return await sdk.session.delete({ path: { id: args.path.id }, query: { directory: args.query.directory } });
-      },
-      async create(args) {
-        const r = await sdk.session.create({
-          body: {
-            title: args.body.title,
-            ...(args.body.parentID !== undefined && { parentID: args.body.parentID }),
-          },
-          query: { directory: args.query.directory },
-        });
-        return {
-          ...(r.data !== undefined && { data: { id: r.data.id } }),
-          ...(r.error !== undefined && { error: r.error }),
-        };
-      },
-      async prompt(args) {
-        const r = await sdk.session.prompt({
-          path: { id: args.path.id },
-          body: {
-            model: { providerID: args.body.model.providerID, modelID: args.body.model.modelID },
-            ...(args.body.agent !== undefined && { agent: args.body.agent }),
-            ...(args.body.system !== undefined && { system: args.body.system }),
-            tools: args.body.tools,
-            parts: args.body.parts.map((p) => ({ type: "text" as const, text: p.text })),
-          },
-          query: { directory: args.query.directory },
-        });
-        return {
-          ...(r.data !== undefined && {
-            data: {
-              ...(r.data.info !== undefined && {
-                info: {
-                  ...(r.data.info.providerID !== undefined && { providerID: r.data.info.providerID }),
-                  ...(r.data.info.modelID !== undefined && { modelID: r.data.info.modelID }),
-                  ...(r.data.info.error !== undefined && { error: r.data.info.error }),
-                },
-              }),
-              ...(r.data.parts !== undefined && {
-                parts: r.data.parts.map((p) => ({
-                  type: p.type,
-                  ...("text" in p && p.text !== undefined && { text: p.text }),
-                })),
-              }),
-            },
-          }),
-          ...(r.error !== undefined && { error: r.error }),
-        };
-      },
-      async messages(args) {
-        const r = await sdk.session.messages({
-          path: { id: args.path.id },
-          query: { directory: args.query.directory },
-        });
-        return {
-          ...(r.data !== undefined && {
-            data: r.data.map((m) => ({
-              info: {
-                ...(m.info.role !== undefined && { role: m.info.role }),
-                ...(m.info.role === "assistant" && {
-                  ...(m.info.providerID !== undefined && { providerID: m.info.providerID }),
-                  ...(m.info.modelID !== undefined && { modelID: m.info.modelID }),
-                  ...(m.info.time !== undefined && {
-                    time: {
-                      ...(m.info.time.completed !== undefined && { completed: m.info.time.completed }),
-                      // W1-v2 lineage time gate needs creation stamps too
-                      ...("created" in m.info.time && m.info.time.created !== undefined && { created: m.info.time.created as number }),
-                    },
-                  }),
-                  ...(m.info.error !== undefined && { error: m.info.error }),
-                }),
-              },
-              parts: m.parts.map((p) => ({
-                type: p.type,
-                ...("text" in p && p.text !== undefined && { text: p.text }),
-                // W1 drafting-evidence read: tool name + input bag of tool parts
-                ...(p.type === "tool" && {
-                  tool: p.tool,
-                  ...(p.state.input !== undefined && { input: p.state.input as Record<string, unknown> }),
-                }),
-              })),
-            })),
-          }),
-          ...(r.error !== undefined && { error: r.error }),
-        };
-      },
-      async get(args) {
-        const r = await sdk.session.get({ path: { id: args.path.id }, query: { directory: args.query.directory } });
-        return {
-          ...(r.data !== undefined && {
-            data: {
-              ...(r.data.id !== undefined && { id: r.data.id }),
-              ...(r.data.parentID !== undefined && { parentID: r.data.parentID }),
-            },
-          }),
-          ...(r.error !== undefined && { error: r.error }),
-        };
-      },
-    },
-  };
+export { toEngineClientV2, createSessionState, clearSessionState } from "./v2/adapter.ts";
+
+/** All tools Sibyl registers, in stable order (tested as an exact set). */
+export function buildSibylTools(deps: ToolDeps): V2ToolInfo[] {
+  return [
+    buildConsultTool(deps),
+    buildAuditTool(deps),
+    buildSwarmTool(deps),
+    buildStatusTool(deps),
+    buildReviewTool(deps),
+    buildAnchorTool(deps),
+    buildTimeProbeTool(deps),
+    buildAttributeTool(deps),
+  ];
 }
 
-export default async function SibylPlugin(
-  input: PluginInput,
-  options?: PluginOptions,
-): Promise<Hooks> {
-  const parsed = parseOptions(options);
-  if (!parsed.ok) {
-    // Plugin-load failures are invisible in the host: scream instead of throwing.
-    for (const line of parsed.errors) {
-      console.error(`[sibyl] config error: ${line}`);
+export const SIBYL_PLUGIN_ID = "sibyl-system";
+
+const SibylPlugin: V2Plugin = {
+  id: SIBYL_PLUGIN_ID,
+  async setup(ctx) {
+    const parsed = parseOptions(ctx.options);
+    if (!parsed.ok) {
+      // Plugin-load failures are invisible in the host: scream instead of throwing.
+      for (const line of parsed.errors) {
+        console.error(`[sibyl] config error: ${line}`);
+      }
+      console.error("[sibyl] SIBYL plugin DISABLED — fix options (no sibyl_* tools registered)");
+      return;
     }
-    console.error("[sibyl] SIBYL plugin DISABLED — fix options (no sibyl_* tools registered)");
-    return {};
-  }
 
-  const deps: ToolDeps = {
-    client: toEngineClient(input.client),
-    store: new RunStore(),
-    options: parsed.options,
-  };
-  return {
-    tool: {
-      sibyl_consult: buildConsultTool(deps),
-      sibyl_audit: buildAuditTool(deps),
-      sibyl_swarm: buildSwarmTool(deps),
-      sibyl_status: buildStatusTool(deps),
-      sibyl_review: buildReviewTool(deps),
-      sibyl_anchor_check: buildAnchorTool(deps),
-      sibyl_time_probe: buildTimeProbeTool(deps),
-      sibyl_attribute: buildAttributeTool(deps),
-    },
-  };
-}
+    const state = createSessionState();
+    const deps: ToolDeps = {
+      client: toEngineClientV2(ctx.session, state),
+      store: new RunStore(),
+      options: parsed.options,
+      resolveDirectory: makeDirectoryResolver(ctx.session, state),
+    };
+    const tools = buildSibylTools(deps);
+
+    // Registration is a pure replay over the fresh editor (transform
+    // callbacks must be sync + cheap + replayable per the 2.x contract).
+    await ctx.tool.transform((editor) => {
+      for (const tool of tools) editor.add(tool);
+    });
+    await ctx.tool.hook("execute.before", gateToolEvent(state));
+    await ctx.session.hook("context", injectSessionSystem(state));
+
+    return () => {
+      clearSessionState(state);
+    };
+  },
+};
+
+export default SibylPlugin;

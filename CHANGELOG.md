@@ -5,6 +5,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [Unreleased] — v2.0.0 target (opencode 2.x migration)
+
+### Changed
+- **opencode 2.x plugin platform.** The plugin is now the V2 entry shape
+  (`{ id, setup(ctx) }`, tools via `ctx.tool.transform`, options via the V2
+  `plugins` config object form). The V1 `@opencode-ai/plugin` dependency is
+  gone; the bundle contains zero `@opencode` runtime imports. V1 registrations
+  stop loading under opencode 2.x — rewire per README (opencode 1.x is
+  retired). Engine business logic is unchanged: the same
+  `EngineClient` seam is bridged by `src/v2/adapter.ts`
+  (create→`session.create` with `location.directory`, model per prompt via
+  `switchModel`, completion via `wait` + `context`, persona system via the
+  `context` hook). See `docs/V2-MIGRATION.md`.
+- **Voter tool-gate enforcement point.** Disallowed voter/worker tools are
+  refused at execution time (`ctx.tool.hook("execute.before")`) instead of
+  being hidden from the per-prompt tool list — same law, stricter point.
+- **Session retention tool.** `scripts/session-reap.mjs` enumerates the 2.x
+  `session_v2` store and deletes through `opencode session delete <id>`
+  (engine-owned cascade); the old `serve` + `DELETE /session/:id` channel is
+  answered 405 by 2.x. Classifier and retention law unchanged.
+
+### Fixed
+- **Engine-default model parity.** An empty `modelPool` default now skips
+  `switchModel` entirely (V1 parity); under 2.x a literal empty model ref
+  persisted to an unusable route and killed every voter
+  (`provider.no-route`).
+- **Idle-failure visibility.** A session that reaches idle with no assistant
+  message now reports the engine's idle outcome and provider error instead of
+  a bare "no assistant message".
+
+### Added
+- `scripts/workdoc-guard.mjs` denylist extended with scratch/cache/editor-junk
+  classes (logs, `.bak/.orig/.rej/.swp/.tmp`, notebooks, interpreter caches,
+  device metadata, IDE workspace dirs) — owner hygiene directive 2026-11-12.
+
 ## [1.6.4] - 2026-11-08
 
 ### Fixed

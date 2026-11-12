@@ -37,6 +37,7 @@ async function fixture() {
     },
     store,
     options: p.options,
+    resolveDirectory: async () => "/sibyl-test",
   };
   return { deps, store, dir };
 }

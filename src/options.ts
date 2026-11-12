@@ -5,10 +5,11 @@
 // plugin whose load-time throw = silent failure in the host, so parseOptions
 // returns a structured Result union and NEVER throws - even for hostile input
 // (zod v4 safeParse itself can rethrow throwing-getter traps, hence the outer
-// try/catch proven necessary by .omo/evidence/t6/zod-probe2.mjs).
+// try/catch proven necessary by a dev-time probe, archived outside this repo).
 //
-// zod here is INTERNAL parsing only (learnings.md #17 dual-instance rule):
-// tool `args` schemas in T8 must use tool.schema.*, never this instance.
+// zod here is INTERNAL parsing only (V1-era dual-instance learning #17; under
+// V2 the tool input schemas in src/tools/define.ts deliberately hand OUR
+// bundled instance to the host as StandardSchemaV1 — duck-typed across realms).
 
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -159,7 +160,7 @@ export const pluginOptionsSchema = z
   /** slot-name -> model pool; "default" entry is mandatory. prefault (not
    * default) so every parse returns a FRESH pool - zod's .default() hands back
    * the same shared object reference and a caller mutation would poison all
-   * later parses (proved: .omo/evidence/t6/zod-probe3.mjs). */
+   * later parses (proved by a dev-time probe, archived outside this repo). */
   modelPool: modelPoolSchema.prefault(DEFAULT_POOL),
   /** v1.1 isolated-lane mechanics (src/lane/isolated.ts). configSource is
    * READ-COPIED into each role home (never written back). */

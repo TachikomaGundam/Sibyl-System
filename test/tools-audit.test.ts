@@ -84,7 +84,7 @@ async function fixture(): Promise<{ deps: (mock: AuditMock) => ToolDeps; ctx: (a
   const dir = await mkdtemp(join(tmpdir(), "sibyl-audit-"));
   const store = new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") });
   return {
-    deps: (mock) => ({ client: mock.client, store, options: options({ timeoutMs: 15_000 }) }),
+    deps: (mock) => ({ client: mock.client, store, options: options({ timeoutMs: 15_000 }), resolveDirectory: async () => "/sibyl-test" }),
     ctx: (artifactDir) => ({ directory: artifactDir, abort: new AbortController().signal, sessionID: "ses-caller-kin" }),
     dir,
   };

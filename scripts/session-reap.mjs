@@ -11,15 +11,23 @@
 //  - dry-run by default; deletion requires --apply;
 //  - ENUMERATION is read-only SQLite (the HTTP list is instance-scoped and
 //    cannot see cross-project accumulation); DELETION goes ONLY through the
-//    engine's own HTTP API on an ephemeral serve that this process spawns and
-//    always kills — the engine owns cascade correctness;
+//    engine's own CLI (`opencode session delete <id>`, which owns cascade
+//    correctness over messages/children) — never through raw sqlite writes;
 //  - every decision (delete/keep/skip + reason) lands in a JSONL manifest;
 //  - tier B (sealed audit roots) refuses to run without --owner-ruling: the
 //    retention-law change is the owner's call, not the tool's;
-//  - every network call carries a hard timeout — half-dead sockets hang nothing.
+//  - every delete is one spawned CLI call with a hard timeout — half-dead
+//    child processes are killed, never awaited forever.
+//
+// opencode 2.x migration (2026-11-12): the V1-era serve + `DELETE /session/:id`
+// channel is dead on 2.x (route answers 405), and live sessions now land in
+// the `session_v2` table (the old `session` table is legacy debris from the
+// 1.x engine and no longer receives writes — verified against 2.2.7: plugin
+// smoke sessions appear in session_v2 only). Enumeration and deletion both
+// moved accordingly; legacy-table cleanup is deliberately OUT of scope here.
 //
 // Usage: node scripts/session-reap.mjs [--apply] [--tier-a-days=7]
-//        [--port=4096] [--db=<path>] [--manifest-dir=<path>]
+//        [--db=<path>] [--manifest-dir=<path>]
 //        [--tier-b-days=N --owner-ruling] [--keep=<regex>]
 
 import { spawn } from "node:child_process";
@@ -58,12 +66,13 @@ export function classify(sessions, opts) {
   return actions;
 }
 
-/** Full-store READ-ONLY enumeration (see header law). */
+/** Live-store READ-ONLY enumeration (see header law). 2.x stores sessions in
+ * session_v2; the 1.x `session` table is legacy and NOT reaped (see header). */
 export function enumerate(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     return db
-      .prepare("SELECT id, title, parent_id AS parentID, time_created AS created, time_updated AS updated FROM session")
+      .prepare("SELECT id, title, parent_id AS parentID, time_created AS created, time_updated AS updated FROM session_v2")
       .all()
       .map((r) => ({ id: r.id, title: r.title ?? "", parentID: r.parentID ?? null, created: r.created ?? 0, updated: r.updated ?? 0 }));
   } finally {
@@ -71,7 +80,26 @@ export function enumerate(dbPath) {
   }
 }
 
-const timeoutFetch = (url, opts = {}, ms = 10_000) => fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
+/** One engine-owned deletion: `opencode session delete <id>` with a hard kill
+ * timer (cross-project verified on 2.2.7: the CLI resolves the id through the
+ * engine store, not the cwd's project). Resolves true on exit code 0. */
+export function deleteSession(bin, id, timeoutMs = 60_000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const child = spawn(bin, ["session", "delete", id], { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      done(false);
+    }, timeoutMs);
+    child.on("error", () => { clearTimeout(timer); done(false); });
+    child.on("exit", (code) => { clearTimeout(timer); done(code === 0); });
+  });
+}
 
 const args = Object.fromEntries(process.argv.slice(2).map((a) => {
   const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
@@ -79,7 +107,6 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => {
 }));
 
 async function main() {
-  const port = Number(args.port ?? 4096);
   const bin = process.env["OPENCODE_BIN"] ?? join(homedir(), ".local", "bin", "opencode");
   const dbPath = args.db ?? join(homedir(), ".local", "share", "opencode", "opencode.db");
   const manifestDir = args["manifest-dir"] ?? join(homedir(), "workspace", "harness", "Sibyl", ".omo", "evidence", `reap-${new Date().toISOString().replace(/[:.]/g, "-")}`);
@@ -98,34 +125,19 @@ async function main() {
   const del = actions.filter((a) => a.action === "delete");
   for (const a of actions) log(a);
   console.log(`candidates: delete=${del.length} keep=${actions.length - del.length} (manifest=${manifest})`);
-  if (!args.apply) { console.log("DRY-RUN (no deletion, no server spawned). Add --apply to execute."); return; }
+  if (!args.apply) { console.log("DRY-RUN (no deletion). Add --apply to execute."); return; }
   if (args["tier-b-days"] !== undefined && !args["owner-ruling"]) throw new Error("tier B requested without --owner-ruling: retention law change is the owner's call");
 
-  const base = `http://127.0.0.1:${port}`;
-  const serve = spawn(bin, ["serve", "--port", String(port)], { stdio: "ignore" });
-  const kill = () => { try { serve.kill("SIGTERM"); } catch { /* already gone */ } };
-  process.on("exit", kill);
-  try {
-    let up = false;
-    for (let i = 0; i < 20; i += 1) {
-      try { if ((await timeoutFetch(`${base}/session`, {}, 2_000)).ok) { up = true; break; } } catch { /* not yet */ }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    if (!up) throw new Error(`serve on :${port} never answered — refusing to delete anything`);
-    let ok = 0; let failed = 0;
-    for (const a of del) {
-      try {
-        const r = await timeoutFetch(`${base}/session/${a.id}`, { method: "DELETE" }, 30_000);
-        if (r.ok) ok += 1; else { failed += 1; log({ id: a.id, action: "delete-failed", http: r.status }); }
-      } catch (e) { failed += 1; log({ id: a.id, action: "delete-failed", error: String(e).slice(0, 120) }); }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    const after = enumerate(dbPath);
-    console.log(`reaped ok=${ok} failed=${failed}; session rows after=${after.length}`);
-    if (failed > 0) process.exitCode = 1;
-  } finally {
-    kill();
+  let ok = 0;
+  let failed = 0;
+  for (const a of del) {
+    if (await deleteSession(bin, a.id)) ok += 1;
+    else { failed += 1; log({ id: a.id, action: "delete-failed", channel: "opencode session delete" }); }
+    await new Promise((r) => setTimeout(r, 50));
   }
+  const after = enumerate(dbPath);
+  console.log(`reaped ok=${ok} failed=${failed}; session_v2 rows after=${after.length}`);
+  if (failed > 0) process.exitCode = 1;
 }
 
 if (process.argv[1] && process.argv[1].endsWith("session-reap.mjs")) {

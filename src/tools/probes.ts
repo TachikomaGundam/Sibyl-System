@@ -15,7 +15,9 @@
 // named limitation in SECURITY.md — hostname-to-internal DNS answers are not
 // filtered because the fetch API cannot pin a connection to a pre-verified IP).
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 import { internalError } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 import { errMessage } from "../util.ts";
@@ -427,7 +429,8 @@ export function attributeExecute(args: AttributeArgs): string {
 
 export function buildTimeProbeTool(deps: ToolDeps) {
   void deps;
-  return tool({
+  return defineTool(deps, {
+    name: TIME_PROBE_TOOL_NAME,
     description:
       "SIBYL time probe (g12b-8): read HTTP Date headers from >=2 operator-distinct remote sources and compare " +
       "against the local clock — verdict SYNCED / DRIFT / INSUFFICIENT-SOURCES with spread and offset in ms. " +
@@ -435,10 +438,10 @@ export function buildTimeProbeTool(deps: ToolDeps) {
       "Endpoints are shape-validated and egress-gated: loopback/private/link-local/metadata shapes and " +
       "internal name suffixes are refused by rule name (blocked sources count as failed receipts).",
     args: {
-      endpoints: tool.schema.string().optional().describe("JSON array of {url,ownerDept}; defaults to the built-in cloudflare/google/mozilla pool."),
-      toleranceMs: tool.schema.number().int().positive().optional().describe("Accepted spread/offset in ms (default 300000 = 5 min, HTTP-date + proxy slop)."),
+      endpoints: z.string().optional().describe("JSON array of {url,ownerDept}; defaults to the built-in cloudflare/google/mozilla pool."),
+      toleranceMs: z.number().int().positive().optional().describe("Accepted spread/offset in ms (default 300000 = 5 min, HTTP-date + proxy slop)."),
     },
-    execute: async (args, _context: ToolContextLike) => {
+    core: async (args, _context: ToolContextLike) => {
       try {
         return await timeProbeExecute(args, { fetchImpl: fetch });
       } catch (e) {
@@ -450,7 +453,8 @@ export function buildTimeProbeTool(deps: ToolDeps) {
 
 export function buildAttributeTool(deps: ToolDeps) {
   void deps;
-  return tool({
+  return defineTool(deps, {
+    name: ATTRIBUTE_TOOL_NAME,
     description:
       "SIBYL attribution (g12b-4): compare supplied ref moves (remote/ref/old/new) against commit metadata and a " +
       "roster (identity+key bindings, ACTIVE entries) — per-move verdict ATTRIBUTED / UNATTRIBUTED / AMBIGUOUS. " +
@@ -459,11 +463,11 @@ export function buildAttributeTool(deps: ToolDeps) {
       "strings the CALLER captured (git log / ls-remote output) — this tool never shells out. " +
       "Malformed or mis-shaped JSON arrays are refused by name, never guessed at.",
     args: {
-      moves: tool.schema.string().describe("JSON array of {remote,ref,oldSha,newSha}."),
-      commits: tool.schema.string().describe("`git log --format=%H|%cn|%ce|%GK` output covering the moved-to commits (newest first or any order)."),
-      roster: tool.schema.string().describe("JSON array of {name,email,keyFingerprint?} — the registered identity bindings."),
+      moves: z.string().describe("JSON array of {remote,ref,oldSha,newSha}."),
+      commits: z.string().describe("`git log --format=%H|%cn|%ce|%GK` output covering the moved-to commits (newest first or any order)."),
+      roster: z.string().describe("JSON array of {name,email,keyFingerprint?} — the registered identity bindings."),
     },
-    execute: async (args) => {
+    core: async (args) => {
       try {
         return attributeExecute(args);
       } catch (e) {

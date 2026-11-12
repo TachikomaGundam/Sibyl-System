@@ -6,7 +6,9 @@
 // plus its spaceDir. store.load() never throws, so a corrupt/missing state
 // file degrades to the empty listing, exactly as the state layer promises.
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 
 import { loadLedger } from "../state/chamber.ts";
 import { dirname } from "node:path";
@@ -18,14 +20,15 @@ import type { ToolContextLike, ToolDeps } from "./shared.ts";
 export const STATUS_TOOL_NAME = "sibyl_status";
 
 export function buildStatusTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: STATUS_TOOL_NAME,
     description:
       "SIBYL status: list recorded sibyl_consult/sibyl_swarm runs (newest last) from the durable run store, " +
       "or show one run's full record and spaceDir when given its runId.",
     args: {
-      runId: tool.schema.string().min(1).optional().describe("Run id (sibyl-<ts>-<hex>) to inspect; omit for the listing."),
+      runId: z.string().min(1).optional().describe("Run id (sibyl-<ts>-<hex>) to inspect; omit for the listing."),
     },
-    execute: async (args, context) => statusExecute(deps, args, context),
+    core: async (args, context) => statusExecute(deps, args, context),
   });
 }
 

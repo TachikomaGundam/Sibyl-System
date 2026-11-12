@@ -14,7 +14,7 @@ import { deadWithoutRecord, parseCliArgs, resolveRun, splitModelId, examVoice } 
 import { cliCommand, nodeBinary, reviewExecute } from "../src/tools/review.ts";
 import { parseOptions } from "../src/options.ts";
 import { RunStore } from "../src/state/index.ts";
-import { toEngineClient } from "../src/index.ts";
+import { createSessionState, toEngineClientV2 } from "../src/index.ts";
 
 test("parseCliArgs: = form, space form, bare booleans, positional rest", () => {
   const r = parseCliArgs(["run", "--target", "/tmp/a.md", "--goal=did it hold?", "--detach", "extra"]);
@@ -142,9 +142,10 @@ test("reviewExecute error doors return strings, never throw, never spawn", async
   assert.ok(opts.ok);
   if (!opts.ok) return;
   const deps = {
-    client: toEngineClient({} as unknown as Parameters<typeof toEngineClient>[0]),
+    client: toEngineClientV2({} as unknown as Parameters<typeof toEngineClientV2>[0], createSessionState()),
     store: new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: dir }),
     options: opts.options,
+    resolveDirectory: async () => "/sibyl-test",
   };
   const ctx = { directory: dir, abort: new AbortController().signal, sessionID: "ses_cli" };
   const noGoal = await reviewExecute(deps, { target: "x.md", goal: "  " }, ctx);

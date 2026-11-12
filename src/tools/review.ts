@@ -14,7 +14,9 @@ import { mkdirPrivate } from "../fsperm.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { tool } from "@opencode-ai/plugin";
+import { z } from "zod";
+
+import { defineTool } from "./define.ts";
 
 import { assessIndependence, independenceLabel } from "../independence.ts";
 import { instrumentFace, rulesLabel } from "../instrument.ts";
@@ -158,19 +160,20 @@ export async function reviewExecute(
 }
 
 export function buildReviewTool(deps: ToolDeps) {
-  return tool({
+  return defineTool(deps, {
+    name: REVIEW_TOOL_NAME,
     description:
       "SIBYL general review (democratic-centralism chamber): broad evidence gathering, blind pro/con clash with cross-critique, " +
       "an independently-drawn judge, bounded rounds — then ONE conclusion in ONE voice. Serves any review need (documents, plans, " +
       "code, agent behavior packs). Launches an isolated headless chamber (zero sessions in your main list) and returns a receipt; " +
       "read the verdict voice from the run record / status when terminal.",
     args: {
-      target: tool.schema.string().min(1).describe("File path (or multi-line inline content) of the artifact to review."),
-      goal: tool.schema.string().min(1).describe("The question the chamber must answer, in one sentence."),
-      seed: tool.schema.string().min(1).optional().describe("Judge-draw seed (E2); omit for a fresh random one."),
-      maxRounds: tool.schema.number().int().min(1).max(8).optional().describe("Clash round cap (default from plugin options)."),
+      target: z.string().min(1).describe("File path (or multi-line inline content) of the artifact to review."),
+      goal: z.string().min(1).describe("The question the chamber must answer, in one sentence."),
+      seed: z.string().min(1).optional().describe("Judge-draw seed (E2); omit for a fresh random one."),
+      maxRounds: z.number().int().min(1).max(8).optional().describe("Clash round cap (default from plugin options)."),
     },
-    execute: async (args, context) =>
+    core: async (args, context) =>
       await reviewExecute(deps, args as ReviewArgs, context as unknown as ToolContextLike),
   });
 }

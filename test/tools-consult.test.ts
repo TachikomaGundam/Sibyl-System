@@ -97,6 +97,7 @@ async function fixture(overScript: Record<string, Step[]>, opts?: unknown): Prom
     client,
     store: new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") }),
     options: options({ timeoutMs: 10_000, ...((opts ?? {}) as Record<string, unknown>) }),
+    resolveDirectory: async () => "/sibyl-test",
   };
   return { deps, dir, prompts, creates };
 }
@@ -236,6 +237,7 @@ test("consult fans the three voters out concurrently (one shared Promise.all)", 
     client,
     store: new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") }),
     options: options({ timeoutMs: 10_000 }),
+    resolveDirectory: async () => "/sibyl-test",
   };
   const settled = await Promise.race([
     consultExecute(deps, { artifact: ARTIFACT, goal: "g" }, { directory: dir, abort: new AbortController().signal, sessionID: "ses_caller" }).then(() => true),
@@ -347,7 +349,7 @@ test("W1 self-convoked poll: drafter's chain convened the review => NOT-INDEPEND
   const parsed = parseOptions({});
   assert.ok(parsed.ok);
   const store = new RunStore({ runsFile: join(dir, "runs.json"), spaceRoot: join(dir, "spaces") });
-  const deps = { client, store, options: parsed.options };
+  const deps = { client, store, options: parsed.options, resolveDirectory: async () => "/sibyl-test" };
   const ctx: ToolContextLike = { directory: dir, abort: new AbortController().signal, sessionID: "ses_caller" };
   const out = await consultExecute(deps, { artifact: artPath, goal: "ship safely" }, ctx);
 

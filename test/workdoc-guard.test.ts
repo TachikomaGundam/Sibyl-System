@@ -13,7 +13,22 @@ const ROOT = new URL("..", import.meta.url).pathname;
 
 test("guardHits: the three leaked classes refuse — wound doc, handoff doc, spike scratch", () => {
   const hits = guardHits(["docs/wound-chamber-dead-without-record-20261104.md", "docs/HANDOFF-2026-11-08.md", "spike/evidence/parallel-run-full.log"]);
-  assert.equal(hits.length, 3);
+  // Counts may exceed 3 when a file matches two classes (the .log rule and the
+  // spike-evidence rule both fire); what is locked is that each named class refuses.
+  for (const why of ["internal wound ledger (R0)", "internal handoff ledger (R0)", "spike evidence logs — machine paths leak (R0)"]) {
+    assert.ok(hits.some((h) => h.includes(why)), `expected refusal reason: ${why}`);
+  }
+});
+
+test("guardHits: scratch/cache/editor-junk classes refuse (owner hygiene directive 2026-11-12)", () => {
+  const junk = [
+    "notes.log", "src/util.ts.bak", "a.orig", "a.rej", "a.swp", "a.tmp",
+    "scratch.ipynb", ".pytest_cache/v/cache/lastfailed", "scripts/__pycache__/x.cpython-312.pyc",
+    ".DS_Store", ".vscode/settings.json", ".idea/workspace.xml",
+  ];
+  for (const f of junk) {
+    assert.ok(guardHits([f]).length > 0, `expected refusal for ${f}`);
+  }
 });
 
 test("guardHits: product surfaces pass — release records, README, src, test, spike design notes", () => {

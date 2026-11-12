@@ -83,39 +83,48 @@ Bubblewrap provides hardened filesystem containment. macOS and Windows use
 portable containment only with `credentialProxy`; it protects credentials but
 does not stop artifacts reading files accessible to the runner account.
 
-Register the published npm package by name (opencode resolves it from npm):
+Install the published npm package (opencode 2.x plugin system; opencode 1.x
+is retired):
+
+```sh
+opencode plugin add sibyl-system
+```
+
+Or register it in `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 {
-  "plugin": ["sibyl-system"]
+  "plugins": ["sibyl-system"]
 }
 ```
 
-Alternatively, register a local checkout by path. One registration line in
+Alternatively, register a local checkout by path — a configured local path
+must be a **directory** (a checkout of this repo with `dist/` built, or an
+installed npm package directory such as `node_modules/sibyl-system`; a path
+to a single file is silently skipped by 2.x). One entry in
 `~/.config/opencode/opencode.jsonc`
 (Windows: `%USERPROFILE%\.config\opencode\opencode.jsonc`). This is a
 **documented example only** — the plugin never edits your config:
 
 ```jsonc
 {
-  "plugin": [
-    [
-      "/abs/path/to/sibyl-system/src/index.ts",
-      {
+  "plugins": [
+    {
+      "package": "/abs/path/to/sibyl-system",
+      "options": {
         "modelPool": {
           "default": { "providerID": "your-provider", "modelID": "your-model" }
         },
         "concurrencyK": 4
       }
-    ]
+    }
   ]
 }
 ```
 
-Registering the TS entry directly is supported (opencode transpiles plugin
-sources with Bun). The tuple's second element is passed **verbatim** as the
-options object, so option fields sit at its **top level** (as in the example);
-unknown keys are rejected loudly, never silently ignored. The options object is
+The options object's fields sit at its **top level** (as in the example) and
+are passed **verbatim**; unknown keys are rejected loudly, never silently
+ignored. The options object is
 the **only** config surface — there are no other config files (the
   `SIBYL_STATE_FILE` and `SIBYL_CHAMBER_LEDGER` env vars exist solely as
   explicit test/CI isolation seams, see State).
@@ -174,27 +183,32 @@ your host `configSource`, and it never receives the upstream API key.
 
 ```jsonc
 {
-  "plugin": [["sibyl-system", {
-    "modelPool": {
-      "default": { "providerID": "review-gateway", "modelID": "review-model" }
-    },
-    "modelPolicy": { "allowedPrefixes": ["review-gateway/"] },
-    "credentialProxy": {
-      "providers": {
-        "review-gateway": {
-          "baseUrl": "https://gateway.example.com",
-          "keyFile": "~/.config/sibyl/review-gateway.key",
-          "models": ["review-model"]
+  "plugins": [
+    {
+      "package": "sibyl-system",
+      "options": {
+        "modelPool": {
+          "default": { "providerID": "review-gateway", "modelID": "review-model" }
         },
-        "local": {
-          "baseUrl": "http://127.0.0.1:8000",
-          "keyless": true,
-          "models": ["local-review"]
+        "modelPolicy": { "allowedPrefixes": ["review-gateway/"] },
+        "credentialProxy": {
+          "providers": {
+            "review-gateway": {
+              "baseUrl": "https://gateway.example.com",
+              "keyFile": "~/.config/sibyl/review-gateway.key",
+              "models": ["review-model"]
+            },
+            "local": {
+              "baseUrl": "http://127.0.0.1:8000",
+              "keyless": true,
+              "models": ["local-review"]
+            }
+          },
+          "maxRequestsPerRole": 2000
         }
-      },
-      "maxRequestsPerRole": 2000
+      }
     }
-  }]]
+  ]
 }
 ```
 
@@ -227,7 +241,7 @@ container for those threat models.
 The published package pins **no device-side model authorizations**: the only
 model defaults shipped are empty-string sentinels (= "host default") and the
 generic `local-` seating prefix. Concrete provider/model ids live exclusively
-in **your** config — the registration tuple's options object (per-operator
+in **your** config — the options object of the registration entry (per-operator
 `modelPool` / `modelPolicy` / `--model` flag). Operators on shared fleets
 conventionally keep concrete values in an operator-local file that their own
 shell or OpenCode configuration feeds into that options object at registration.

@@ -40,6 +40,11 @@ export type ToolDeps = {
   client: EngineClient;
   store: RunStore;
   options: PluginOptions;
+  /** Resolve the calling session's working directory from the ENGINE store
+   * (opencode 2.x ToolContext carries no directory; the entry wires this to
+   * session.get(...).location.directory with a per-session cache — still
+   * per-session authority, never a closure capture). */
+  resolveDirectory: (sessionID: string) => Promise<string>;
 };
 
 /** Upper bound for accepted artifact content (256 KiB). */
