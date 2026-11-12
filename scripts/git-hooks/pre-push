@@ -67,10 +67,16 @@ police_name() { # $1=ref name to police, $2=pushed oid
   [ "$pkg_ver" = "${ver#v}" ] \
     || block "tag $ver carries package.json version \"$pkg_ver\" inside its own object — ghost-version class: the in-tag version must equal the tag name"
   [ -f "$LEASE_FILE" ] || block "no release lease at $LEASE_FILE (scripts/release-lease.sh acquire $ver <who>)"
-  # EXACT string compare on the lease value: dots in a version are data, not
-  # regex — an unescaped grep let "v9x9x9" authorize "v9.9.9".
+  # EXACT string compare on the version domain: the leading 'v' of a tag name
+  # is presentational, dots in a version are data, not regex — an unescaped
+  # grep once let "v9x9x9" authorize "v9.9.9". Both documented acquire forms —
+  # bare "2.0.0" (release packet pre-tag steps) and tag-name "v2.0.0" (the
+  # hook hint) — authorize tag v2.0.0; every other value stays refused.
+  # (2026-11-12: the prescribed bare form was refused by the tag-name-only
+  # compare — the v2.0.0 wheel stalled at exactly this gate; fixed toward the
+  # documented usage without relaxing exactness.)
   lease_ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LEASE_FILE" | head -n 1)"
-  [ "$lease_ver" = "$ver" ] \
+  [ "${lease_ver#v}" = "${ver#v}" ] \
     || block "lease at $LEASE_FILE does not name $ver (found \"$lease_ver\") — is another seat holding the wheel?"
   # v1.5.0 tag-body hygiene (handoff queue §3.6, root cause: the v1.4.0 tag
   # message carried one /home/... clone path onto the public remote): the tag

@@ -188,6 +188,26 @@ test("W4-9 lease names another version → refuse", async (t) => {
   assert.match(res.stderr, /does not name v9\.9\.9/);
 });
 
+test("W4-9b bare lease domain (release-packet form '9.9.9') authorizes tag v9.9.9", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const lease = await leaseFor(dir, "9.9.9");
+  const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+  assert.equal(res.crashed, false, res.stderr);
+  assert.equal(res.code, 0, res.stderr);
+});
+
+test("W4-9c bare-domain mismatch and escape classes stay refused", async (t) => {
+  const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.9", receiptInTag: true });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const bad of ["8.8.8", "9x9x9", "vv9.9.9", ""]) {
+    const lease = await leaseFor(dir, bad);
+    const res = await drive(dir, [pushLine("v9.9.9", oid)], lease);
+    assert.equal(res.code, 1, `lease "${bad}" must not authorize v9.9.9`);
+    assert.match(res.stderr, /does not name v9\.9\.9/);
+  }
+});
+
 test("W4-10 THE RED (version side): in-tag 9.9.8 + worktree dirtied to 9.9.9 → refuse (object read, not tree)", async (t) => {
   const { dir, oid } = await makeRepo({ tag: "v9.9.9", pkgVersion: "9.9.8", receiptInTag: true, pkgWorktreeOverride: "9.9.9" });
   t.after(() => rm(dir, { recursive: true, force: true }));
