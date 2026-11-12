@@ -2,6 +2,19 @@ name: publish
 on:
   push:
     tags: ["v*"]
+  # 2026-11-13 republish door (v2.0.0 pinned-file cure; DRAFT pending owner
+  # ruling): a tag push executes the workflow file PINNED at the tag commit, so
+  # a tooling defect in that file can strand an already-audited tag — and the
+  # anchor law forbids moving the tag. Manual dispatch retries from the CURRENT
+  # reviewed file while every door stays closed: tree, sha and receipt are
+  # re-resolved server-side from the tag; tag-paperwork and publish-gate
+  # re-run unchanged; publishing still requires the OIDC identity of THIS job.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v2.0.0)
+        required: true
+        type: string
 permissions:
   contents: read
   id-token: write
@@ -15,12 +28,28 @@ jobs:
       # scheduled audit bound to THIS commit. Gate self-deletion is answered by
       # EXTERNAL anchors (branch protection + border cross-rule), see OPEN-VECTORS.md.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Dispatch path: resolve the tag SERVER-SIDE. The sha and the checkout
+      # come from origin's tag ref, never from the dispatch input text beyond
+      # the ref lookup itself; a missing tag refuses before anything runs.
+      - name: resolve release tag (dispatch path)
+        if: github.event_name == 'workflow_dispatch'
+        id: rel
+        run: |
+          git fetch --force origin "refs/tags/${{ inputs.tag }}:refs/tags/${{ inputs.tag }}"
+          test -n "$(git rev-parse -q --verify "refs/tags/${{ inputs.tag }}")" \
+            || { echo "::error::tag ${{ inputs.tag }} not found on origin — refusing" && exit 1; }
+          echo "sha=$(git rev-parse "refs/tags/${{ inputs.tag }}^{commit}")" >> "$GITHUB_OUTPUT"
+      - name: check out the tagged tree (dispatch path)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.rel.outputs.sha }}
       # Server-side W4 echo (98f3 audit blocker, 2026-11-03): the local hook's
       # paperwork — tag/version parity + release receipt with a literal
       # `gate: PASS` — re-runs HERE, where --no-verify cannot reach.
       - name: tag paperwork (parity + receipt)
         env:
-          TAG_REF: ${{ github.ref_name }}
+          TAG_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: node scripts/tag-paperwork.mjs
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -54,8 +83,8 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_SHA: ${{ github.sha }}
-          TAG_REF: ${{ github.ref_name }}
+          HEAD_SHA: ${{ steps.rel.outputs.sha || github.sha }}
+          TAG_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           TAG_REF_CREATED_AT: ${{ steps.clock.outputs.ts }}
         run: node scripts/publish-gate.mjs --workflow scheduled-audit.yml --poll-seconds=30 --wait-minutes=20
       - run: npm ci --ignore-scripts
