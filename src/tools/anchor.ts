@@ -1,5 +1,5 @@
-// provenance: g12b-3 human-anchor validator primitive (plan: Abathur loop/proposals/
-// g12b-instruments-draft.md), original clean-room implementation.
+// provenance: g12b-3 human-anchor validator primitive (plan: internal g12b
+// instruments draft, kept off-repo), original clean-room implementation.
 //
 // sibyl_anchor_check — mechanically re-verifies a "human anchor" claim (a message
 // the owner says they sent: order/approval/ratification) against the engine's own

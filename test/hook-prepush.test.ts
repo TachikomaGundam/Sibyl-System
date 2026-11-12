@@ -1,4 +1,4 @@
-// provenance: W4 regression tests (handoff HANDOFF-SIBYL-20261004.md), hardened
+// provenance: W4 regression tests (the 2026-10-04 owner handoff, kept off-repo), hardened
 // by the live council review of run sibyl-20261004T163519Z-f68c: object-vs-
 // worktree divergence locked for BOTH release facts (receipt AND version),
 // every stdin ref line policed, crash-vs-refusal distinguished, env sanitized,
@@ -392,7 +392,7 @@ test("W4-HY-3 compliant anchor body (hashes/run-ids/formula, tagger email in hea
       "final gate scan (head abc1234, dirty=False, PASS): report .border/runs/1fe91843-2026-10-23T12-02-56-528Z/report.json sha256 cb715199db7c6aba",
       "blind audit: final round sibyl-20261023T120323Z-7e70 = APPROVE 2A/1R/0E/0M rules=9713b034cfd5",
       "boundary: git log --format=%h v1.4.0..v1.5.0^{commit}",
-      "lease: v9.9.9 held by abathur-sibyl-window at tag mint",
+      "lease: v9.9.9 held by sibyl-window-1 at tag mint",
     ].join("\n"),
   });
   t.after(() => rm(dir, { recursive: true, force: true }));

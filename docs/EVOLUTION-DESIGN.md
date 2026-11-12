@@ -1,18 +1,19 @@
 # SIBYL EVOLUTION DESIGN v1.1 — 民主集中制评审装置（general-purpose review apparatus）
 
-provenance: Abathur seat, session at the Sibyl-System repository (dir harness/magi, legacy name), 2026-09-24. Inputs: SWARM-EVOLUTION-HANDOFF.md
-(PCB-Agent/.omo/self-audit/, read-only), SIBYL-HANDOFF.md F1–F7, research SR1–SR4 (same dir),
-live boulder 09-18 team-mode failure + b141 three-round convergence exemplars. Human orders
-registered verbatim in .omo/evidence/INTENT-LEDGER.md.
+provenance: drafted in a working session at the Sibyl-System repository (dir harness/magi, legacy name), 2026-09-24. Inputs: a read-only cross-project
+swarm-evolution handoff (kept outside this repository), Sibyl handoff findings F1–F7,
+research notes SR1–SR4, live boulder 09-18 team-mode failure + b141 three-round
+convergence exemplars. Human orders are registered verbatim in the operator ledger,
+kept outside the public repository.
 
 ## 0. Mission (reconciled)
 
 - O1 (handoff): evolve the swarm/adversarial-evaluation mechanism to serve as the judge
-  apparatus for Abathur's self-evolution loop, honoring L1–L7, delivering E1–E6, acceptance A1–A5.
-- O2 (human, same day, supersedes narrowness of O1): 进化目标不只是担任阿巴瑟的进化回路评审，是要辅助
+  apparatus for the evolution engine's self-evolution loop, honoring L1–L7, delivering E1–E6, acceptance A1–A5.
+- O2 (human, same day, supersedes narrowness of O1): 进化目标不只是担任进化引擎回路的评审，是要辅助
   **任何需要评审的地方**进行评审。西比拉系统内部要实现**民主集中制**：内部可以高对抗性密集交锋，从广泛
   的来源获取证据，辩论之后对外统一**一个结论、一个声音**。
-- Reconciliation: the chamber (§4) is the general mechanism; Abathur's behavioral exam (§5) is
+- Reconciliation: the chamber (§4) is the general mechanism; an evolution-seat behavioral exam (§5) is
   ONE consumer profile among {document, code, plan, behavior-exam}. Repo home = harness/magi
   (package `sibyl-system`; harness/swarm stays frozen as the legacy L0 record plugin — E6 resolves
   team_* by RETIREMENT into this chamber design, per its 0-for-2 record + spike-m0 headless NO-GO).
@@ -41,7 +42,7 @@ registered verbatim in .omo/evidence/INTENT-LEDGER.md.
   disk and asserts (mechanized in `assertOnDisk()`; prose not trusted).
 - SR3 honest ceiling: single-uid box ⇒ controls make dishonesty LOUD (serials, hashes, canaries),
   not IMPOSSIBLE, until C-09 containment + C-14 privilege ruling land (both HUMAN decisions,
-  tracked open in INTENT-LEDGER). Until then every behavioral verdict stamps
+  tracked open in the operator ledger (outside the public repository)). Until then every behavioral verdict stamps
   PERFORMANCE-ONLY-IN-LOOP on its face.
 
 ## 2. Package layout added by v1.1

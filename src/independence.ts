@@ -1,4 +1,4 @@
-// provenance: W1 convener-recusal law (handoff HANDOFF-SIBYL-20261004.md;
+// provenance: W1 convener-recusal law (2026-10-04 owner handoff, kept off-repo;
 // prototypes: 28 USC §455(b)(3) — a judge with a personal relation must
 // recuse; the audit-general is independent of the ministry audited).
 //

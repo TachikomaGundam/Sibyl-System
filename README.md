@@ -441,11 +441,11 @@ node smoke/run-smoke.mjs   # offline smoke of the shipped surface (see smoke/REA
 
 Live end-to-end evidence (real opencode, real model sessions):
 
-- `.omo/evidence/t10/` (internal working evidence, not shipped) — happy path: 3 real voters audited an artifact with
+- Working evidence t10 (recorded outside this repository, not shipped) — happy path: 3 real voters audited an artifact with
   planted defects and returned fail-closed **REJECT 0A/3R**, citing all 3
   planted defect classes; council wall time 95.6 s ≈ slowest single voter
   (Σ 168.2 s), proving true parallel fan-out.
-- `.omo/evidence/t11/` (internal working evidence, not shipped) — failure paths, 31/31 assertions: a bad model slot
+- Working evidence t11 (recorded outside this repository, not shipped) — failure paths, 31/31 assertions: a bad model slot
   produced 3 error votes, and the run failed closed; SIGINT mid-run left
   the store valid with the interrupted run honestly frozen at `running`.
   (The recorded tally predates the judgment-table law pinned in

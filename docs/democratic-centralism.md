@@ -1,7 +1,7 @@
 # 民主集中制评审装置（Democratic-Centralism Review Chamber）— v1.1
 
-provenance: Abathur seat, Sibyl-System (西比拉系统正式名; package sibyl-system; dir harness/magi 为旧名) v1.1, 2026-09-24.
-Orders: INTENT-LEDGER.md ORD-1 (handoff 进化西比拉系统) + ORD-2 (general review,
+provenance: drafted in a working session, Sibyl-System (西比拉系统正式名; package sibyl-system; dir harness/magi 为旧名) v1.1, 2026-09-24.
+Orders: operator-ledger entries ORD-1 (handoff 进化西比拉系统) + ORD-2 (general review,
 internal high-intensity clash, broad evidence, external ONE conclusion ONE voice).
 Design law: docs/EVOLUTION-DESIGN.md. This file is the mechanism contract.
 

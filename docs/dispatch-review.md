@@ -59,4 +59,4 @@
 
 ## 5. 对计划的修订
 
-plan v0 中 `src/swarm/` 的 G2-OPEN 由本报告解决：swarm 层 = `magi_swarm` 工具 + 上述三段引擎（engine 复用 spike 的 runPersona 契约），完全独立于 OMO team-mode。计划已更新至 v1（`.omo/plans/magi-plugin.md`，内部工作证据，不随包发布）。
+plan v0 中 `src/swarm/` 的 G2-OPEN 由本报告解决：swarm 层 = `magi_swarm` 工具 + 上述三段引擎（engine 复用 spike 的 runPersona 契约），完全独立于 OMO team-mode。计划已更新至 v1（计划文件留档于仓外，内部工作证据，不随包发布）。

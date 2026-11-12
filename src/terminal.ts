@@ -1,5 +1,5 @@
 // provenance: W2 缺席即伤残 (absence-as-disability) primitive, handoff
-// HANDOFF-SIBYL-20261004.md. The swarm first campaign (2026-10-04, 8 workers
+// the 2026-10-04 owner handoff (kept off-repo). The swarm first campaign (2026-10-04, 8 workers
 // 7 dead) showed the failure class: a worker died mid-run, cast NO durable
 // record, and the tally displayed the ballot as if participation had happened.
 // Kin of the 2026-09-29 counting accident (absence counted as a reject).

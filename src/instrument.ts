@@ -1,4 +1,4 @@
-// provenance: W3 instrument-version-on-the-ballot (handoff HANDOFF-SIBYL-20261004.md,
+// provenance: W3 instrument-version-on-the-ballot (2026-10-04 owner handoff, kept off-repo,
 // prototype SOX§101/PCAOB — the auditor itself leaves an auditable trace).
 //
 // The law: every run records WHICH ruler spoke — the sha256 of every persona

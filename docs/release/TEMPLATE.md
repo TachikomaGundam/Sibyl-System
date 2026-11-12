@@ -13,7 +13,7 @@ gate: <PASS or FAIL — write the REAL gate verdict here; the literal placeholde
   amend -> tag. The tag body must never contain a 'pending' placeholder for a proof the
   seat can already produce. Delta must contain ONLY the expected release files.
 - gate evidence permanence: copy the gate report AND each leg's log into the operator's
-  PERSISTENT evidence dir (/home-anchored .omo/evidence/<wheel>/... — the criterion is
+  PERSISTENT evidence dir (an operator-local evidence root under the operator's home, path held off-repo — the criterion is
   non-tmpfs durability, NOT git-trackedness; this ledger is deliberately operator-local)
   in the generating turn, and anchor this packet to those ABSOLUTE paths + sha256.
   tmpfs is not a receipt home — an anchor that dies with a reboot is an unfalsifiable

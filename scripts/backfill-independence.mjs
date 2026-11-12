@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // provenance: W1 handoff law — "既往自召票一次性回填标记" (one-time backfill of
-// prior self-convened ballots), HANDOFF-SIBYL-20261004.md.
+// prior self-convened ballots) — the 2026-10-04 owner handoff, kept outside this repository.
 //
 // Discipline honored while doing it:
 //   - engine-store forensics, not narrative: the 91fc chain/kinship finding is

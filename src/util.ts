@@ -1,5 +1,5 @@
 // provenance: v1.5.0 L-SINGLE-SOURCE consolidation (2026-10-24 wheel, queue item 2
-// of HANDOFF-SIBYL-20261023.md §3): withTimeout existed twice (engine/index.ts and
+// of the 2026-10-23 owner handoff §3 (kept off-repo): withTimeout existed twice (engine/index.ts and
 // tools/shared.ts), the unknown-error renderer existed three times (engine
 // describeError, options describeError, tools errMessage). Behaviour is UNCHANGED —
 // this module is the one definition each former copy now imports.

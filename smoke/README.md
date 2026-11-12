@@ -19,9 +19,9 @@ touched: `sibyl_status` is read-only and no run is created.
 ## Optional live smoke (manual, at your own risk)
 
 End-to-end against a real opencode install. This is **documentation for a
-human** — the offline kit above is what CI runs. The proven discipline from
-`.omo/evidence/t10` and `.omo/evidence/t11` (`scripts/register-t11.mjs`,
-`scripts/unregister-t11.mjs`; internal working evidence, not shipped):
+human** — the offline kit above is what CI runs. The proven discipline behind
+this kit (`scripts/register-t11.mjs`, `scripts/unregister-t11.mjs`; working
+evidence recorded outside the public repository, not shipped):
 
 1. **Baseline**: record `sha256sum ~/.config/opencode/opencode.jsonc` (macOS:
    `shasum -a 256`, Windows PowerShell: `Get-FileHash`) and keep

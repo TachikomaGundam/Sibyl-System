@@ -1,5 +1,5 @@
 // provenance: g12b-8 remote time-source probe + g12b-4 ref-move attribution
-// comparator (plan: Abathur loop/proposals/g12b-instruments-draft.md), clean-room.
+// comparator (plan: internal g12b instruments draft, kept off-repo), clean-room.
 //
 // design discipline shared by both probes:
 //  - PURE cores, injected I/O (fetch / parsed inputs) so vitest never touches network or git;
@@ -7,7 +7,7 @@
 //  - independence is mechanical: two sources signed/owned by the SAME owner/dept
 //    are ONE source (the double-mirror-of-one-master attack).
 //
-// v1.5.0 input law (queue §3.1 of HANDOFF-SIBYL-20261023.md): caller-supplied JSON
+// v1.5.0 input law (queue §3.1 of the 2026-10-23 owner handoff, kept off-repo): caller-supplied JSON
 // is NEVER trusted straight out of JSON.parse — every array goes through a shape
 // validator with a named, field-pathed rejection before any predicate reads it.
 // The time probe additionally never egresses toward internal address space:

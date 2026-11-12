@@ -10,7 +10,7 @@
 // Why structural types instead of the SDK package: the same discipline as the
 // EngineClient seam — the plugin keeps ZERO runtime dependency on the host and
 // survives SDK repackings; the host accepts a plain {id, setup} default export
-// (the local abathur plugin runs this shape on 2.2.7). Widening/renaming on the
+// (a local seat plugin runs this shape on 2.2.7). Widening/renaming on the
 // host side surfaces as adapter errors at runtime, which the {data,error}
 // envelope and the LOUD-disable path already channel honestly.
 
