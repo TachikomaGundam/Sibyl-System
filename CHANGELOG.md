@@ -5,7 +5,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
-## [Unreleased] — v2.0.0 target (opencode 2.x migration)
+## [2.0.0] — 2026-11-12 (opencode 2.x migration)
 
 ### Changed
 - **opencode 2.x plugin platform.** The plugin is now the V2 entry shape
@@ -36,6 +36,12 @@ Authoritative per-release detail lives in the release packets under `docs/releas
   a bare "no assistant message".
 
 ### Added
+- Carried release-law changes first shipped without a changelog entry are now
+  recorded under 2.0.0: the W5 pre-push hook law (release tags only after the
+  commit lands on remote main), the H1 release-day auto-witness (publish waits
+  for the audit its own tag triggered), the Chinese README with a zero-CJK
+  English README, and the lane fix that keeps a masking directory from killing
+  the lane binary.
 - `scripts/workdoc-guard.mjs` denylist extended with scratch/cache/editor-junk
   classes (logs, `.bak/.orig/.rej/.swp/.tmp`, notebooks, interpreter caches,
   device metadata, IDE workspace dirs) — owner hygiene directive 2026-11-12.

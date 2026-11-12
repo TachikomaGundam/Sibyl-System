@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Sibyl-System offline smoke kit (plan task 12). Deterministic, no live LLM, no
-// network, no config writes: exercises only the SHIPPED surface of the built
-// bundle (import -> factory -> tool registry -> sibyl_status). The run store is
-// isolated via SIBYL_STATE_FILE into a throwaway /tmp sandbox that is always
-// removed; your real ~/.sibyl store is never touched (no createRun,
-// sibyl_status only reads).
+// Sibyl-System offline smoke kit (opencode 2.x platform). Deterministic, no
+// live LLM, no network, no config writes: exercises only the SHIPPED surface of
+// the built bundle (import -> plugin definition -> setup(ctx) -> tool registry
+// -> sibyl_status). The run store is isolated via SIBYL_STATE_FILE into a
+// throwaway sandbox that is always removed; your real ~/.sibyl store is never
+// touched (no createRun, sibyl_status only reads).
 //
 // Usage: npm run build && node smoke/run-smoke.mjs
 // Exit 0 = SMOKE PASS, 1 = SMOKE FAIL. One "ok"/"FAIL" line per check.
 
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,49 +29,92 @@ const sandbox = mkdtempSync(join(tmpdir(), "sibyl-smoke-"));
 const stateFile = join(sandbox, "runs.json");
 process.env.SIBYL_STATE_FILE = stateFile;
 
-/** Minimal structural PluginInput stand-in; the client is never called. */
-const fakeInput = () => ({
-  client: { session: {} },
-  directory: sandbox,
-  worktree: sandbox,
-});
+/** Minimal structural V2 plugin context; the engine is never called for real.
+ * `get` answers the per-session directory lookup that the tool layer uses. */
+function fakeContext(options) {
+  const registered = [];
+  const hooks = [];
+  let transformCalls = 0;
+  const ctx = {
+    location: { directory: sandbox },
+    options,
+    session: {
+      async get() {
+        return { id: "ses_smoke", location: { directory: sandbox } };
+      },
+      async hook(name, cb) {
+        hooks.push({ name, cb });
+        return { dispose: async () => {} };
+      },
+    },
+    tool: {
+      async transform(cb) {
+        transformCalls += 1;
+        cb({
+          add: (info) => registered.push(info),
+          list: () => [],
+          get: () => undefined,
+          update: () => {},
+          remove: () => {},
+        });
+        return { dispose: async () => {} };
+      },
+      async hook(name, cb) {
+        hooks.push({ name, cb });
+        return { dispose: async () => {} };
+      },
+    },
+  };
+  return { ctx, registered, hooks, transformCalls: () => transformCalls };
+}
 
 try {
-  // 1. the built ESM bundle imports cleanly and default-exports the factory
+  // 1. the built ESM bundle imports cleanly and default-exports the V2 definition
   const distPath = join(repoRoot, "dist", "index.js");
   if (!check("dist/index.js exists (run `npm run build` first)", existsSync(distPath), distPath)) {
     throw new Error("missing build artifact");
   }
   const mod = await import(pathToFileURL(distPath).href);
+  const plugin = mod.default;
   check(
-    "bundle imports; default export is the plugin factory",
-    typeof mod.default === "function",
-    `typeof default = ${typeof mod.default}`,
+    "bundle imports; default export is the V2 plugin definition {id, setup}",
+    plugin !== null && typeof plugin === "object" &&
+      plugin.id === "sibyl-system" && typeof plugin.setup === "function",
+    `typeof default = ${typeof plugin}, id = ${plugin && plugin.id}`,
+  );
+  const bundle = readFileSync(distPath, "utf8");
+  check(
+    "bundle carries zero @opencode runtime imports",
+    !bundle.includes("@opencode-ai/") && !bundle.includes('from "@opencode/'),
+    "grep @opencode over the built bundle",
   );
 
-  // 2. invalid options -> empty hooks + loud DISABLED line on stderr (no throw)
+  // 2. invalid options -> LOUD DISABLED lines on stderr, NO tools registered
   const errLines = [];
   const realError = console.error;
   console.error = (...args) => errLines.push(args.map(String).join(" "));
-  let disabledHooks;
+  let disabled;
   try {
-    disabledHooks = await mod.default(fakeInput(), { maxRounds: 99 }); // 99 > cap 16
+    disabled = fakeContext({ maxRounds: 99 }); // 99 > cap 16
+    await plugin.setup(disabled.ctx);
   } finally {
     console.error = realError;
   }
   check(
-    "invalid options -> {} and DISABLED line on stderr (never throws)",
-    Object.keys(disabledHooks).length === 0 &&
+    "invalid options -> DISABLED line on stderr and no tool registration",
+    disabled.transformCalls() === 0 &&
+      disabled.hooks.length === 0 &&
       errLines.some((l) => l.includes("SIBYL plugin DISABLED")) &&
       errLines.some((l) => l.includes("[sibyl] config error:")),
     errLines.find((l) => l.includes("config error")) ?? "no config error line",
   );
 
-  // 3. valid minimal options -> exactly the full shipped tool surface
-  // (canonical list mirrored from test/entry.test.ts — keep both in sync)
-  const hooks = await mod.default(fakeInput(), {
+  // 3. valid minimal options -> exactly the full shipped tool surface + the
+  // two law hooks (execute.before gate, context system injection)
+  const live = fakeContext({
     modelPool: { default: { providerID: "smoke", modelID: "smoke" } },
   });
+  const cleanup = await plugin.setup(live.ctx);
   const expected = [
     "sibyl_anchor_check",
     "sibyl_attribute",
@@ -82,24 +125,28 @@ try {
     "sibyl_swarm",
     "sibyl_time_probe",
   ];
-  const toolNames = Object.keys(hooks.tool ?? {}).sort().join(",");
+  const toolNames = live.registered.map((t) => t.name).sort().join(",");
   check(
     `valid options -> tools {${expected.join(", ")}} exactly`,
     toolNames === [...expected].sort().join(","),
     `got {${toolNames}}`,
   );
+  const hookNames = live.hooks.map((h) => h.name).sort().join(",");
+  check(
+    "valid options -> law hooks: execute.before + context",
+    hookNames === ["context", "execute.before"].sort().join(","),
+    `got {${hookNames}}`,
+  );
+  check("setup returns a cleanup function", typeof cleanup === "function", typeof cleanup);
 
   // 4. sibyl_status against the fresh sandbox store -> empty listing, read-only
-  const out = await hooks.tool.sibyl_status.execute(
-    {},
-    { directory: sandbox, abort: new AbortController().signal },
-  );
+  const status = live.registered.find((t) => t.name === "sibyl_status");
+  const out = await status.execute({}, { sessionID: "ses_smoke", signal: new AbortController().signal });
+  const text = typeof out === "string" ? out : out && typeof out.content === "string" ? out.content : "";
   check(
     "sibyl_status on fresh store -> 'no sibyl runs recorded (store: …)'",
-    typeof out === "string" &&
-      out.startsWith("no sibyl runs recorded (store: ") &&
-      out.includes(stateFile),
-    out,
+    text.startsWith("no sibyl runs recorded (store: ") && text.includes(stateFile),
+    text,
   );
   check(
     "sibyl_status stayed read-only (sandbox runs file not created)",
