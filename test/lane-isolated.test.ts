@@ -14,6 +14,8 @@ import {
   collectSessionDb,
   composeRunArgs,
   composeSandboxArgs,
+  parsePureSupport,
+  probePureSupport,
   resolveLaneBin,
   extractSessionId,
   killRole,
@@ -59,6 +61,62 @@ test("composeRunArgs: exact argv — run/--title/--format json/--pure/-m + singl
 test("composeRunArgs: resume adds --session; pure:false omits --pure", () => {
   const a = composeRunArgs({ title: "t", modelId: "p/m", message: "x", resumeSession: "ses_abc", pure: false, timeoutMs: 1000 });
   assert.deepEqual(a, ["run", "--title", "t", "--format", "json", "--session", "ses_abc", "-m", "p/m", "x"]);
+});
+
+test("composeRunArgs: pureSupported=false omits --pure, rest unchanged (OC 2.x precheck path)", () => {
+  const a = composeRunArgs({ title: "t", modelId: "p/m", message: "x", timeoutMs: 1000 }, false);
+  assert.deepEqual(a, ["run", "--title", "t", "--format", "json", "-m", "p/m", "x"]);
+});
+
+test("parsePureSupport: help listing --pure → true; 2.x-style help without it → false", () => {
+  assert.equal(parsePureSupport("USAGE\n  opencode run [flags]\nFLAGS\n  --pure  run without user config\n"), true);
+  assert.equal(parsePureSupport("DESCRIPTION\n  Run OpenCode with a message\nUSAGE\n  opencode run [flags]\n"), false);
+});
+
+test("probePureSupport: advertised → true; silent/unadvertised bin → false; unrunnable → undefined; verdicts cached per bin", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-pure-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const yes = join(dir, "oc-yes");
+  const no = join(dir, "oc-no");
+  const mute = join(dir, "oc-mute");
+  await writeFile(yes, "#!/bin/sh\necho 'FLAGS'\necho '  --pure  pure mode'\n", "utf8");
+  await chmod(yes, 0o755);
+  await writeFile(no, "#!/bin/sh\necho 'USAGE'\necho '  opencode run [flags]'\n", "utf8");
+  await chmod(no, 0o755);
+  await writeFile(mute, "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(mute, 0o755);
+  assert.equal(await probePureSupport(yes), true);
+  assert.equal(await probePureSupport(no), false);
+  assert.equal(await probePureSupport(mute), false, "no output = not advertised");
+  assert.equal(await probePureSupport(join(dir, "does-not-exist")), undefined, "unrunnable probe answers undefined");
+  assert.equal(await probePureSupport(no), false, "cached round-trip agrees");
+});
+
+test("launchRole: --pure rides only when the bin advertises it (ticket 2026-11-12 acceptance A)", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sibyl-pure-launch-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const mk = async (name: string, help: string): Promise<string> => {
+    const p = join(dir, name);
+    await writeFile(
+      p,
+      `#!/bin/sh\nif [ "$1" = "run" ] && [ "$2" = "--help" ]; then printf '%s\\n' '${help}'; exit 0; fi\nprintf '%s\\n' "$@" > '${join(dir, `${name}.argv`)}'\nprintf '{"type":"text","timestamp":1,"sessionID":"ses_pure${name}","part":{"type":"text","text":"ok"}}\\n'\nexit 0\n`,
+      "utf8",
+    );
+    await chmod(p, 0o755);
+    return p;
+  };
+  const oc1 = await mk("oc1x", "FLAGS --pure mode");
+  const oc2 = await mk("oc2x", "USAGE opencode run [flags]");
+  const base = { runDir: join(dir, "run"), configSource: join(dir, "config.jsonc") };
+  const o1 = await launchRole({ ...base, opencodeBin: oc1 }, "v1", { title: "t1", modelId: "p/m", message: "go", timeoutMs: 20_000 });
+  assert.ok(o1.ok, `1.x-style launch failed: ${o1.error ?? ""}`);
+  const argv1 = (await readFile(join(dir, "oc1x.argv"), "utf8")).split("\n");
+  assert.ok(argv1.includes("--pure"), "1.x-style bin keeps --pure (behavior preserved)");
+  const o2 = await launchRole({ ...base, opencodeBin: oc2 }, "v2", { title: "t2", modelId: "p/m", message: "go", timeoutMs: 20_000 });
+  assert.ok(o2.ok, `2.x-style launch failed: ${o2.error ?? ""}`);
+  const argv2 = (await readFile(join(dir, "oc2x.argv"), "utf8")).split("\n");
+  assert.ok(!argv2.includes("--pure"), "2.x-style bin launches WITHOUT --pure (the wound)");
+  assert.ok(argv2.includes("run") && argv2.includes("-m"), "argv shape otherwise intact");
 });
 
 test("extractSessionId: first ses_ id wins; absent is null", () => {
