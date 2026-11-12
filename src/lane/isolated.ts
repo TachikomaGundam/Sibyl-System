@@ -315,14 +315,78 @@ export type LaunchSpec = {
 };
 
 /** Pure argv builder — unit-testable without spawning. Message is passed as
- * ONE argv token; no shell ever sees it (L3/L4). */
-export function composeRunArgs(spec: LaunchSpec): string[] {
+ * ONE argv token; no shell ever sees it (L3/L4).
+ *
+ * `pureSupported` comes from the launch-time capability precheck (PCB lane
+ * ticket 2026-11-12 addendum): OpenCode 2.x `run` has no `--pure` flag, and
+ * an unconditionally-gated role dies at birth there ("Unrecognized flag:
+ * --pure"). The default keeps the V1-era argv for direct unit use; the launch
+ * path always passes the probed value. Isolation is NOT relaxed: role-HOME
+ * pinning (L1) is carried by env, independent of the host flag surface. */
+export function composeRunArgs(spec: LaunchSpec, pureSupported = true): string[] {
   const args = ["run", "--title", spec.title, "--format", "json"];
-  if (spec.pure ?? true) args.push("--pure");
+  if ((spec.pure ?? true) && pureSupported) args.push("--pure");
   if (spec.resumeSession !== undefined) args.push("--session", spec.resumeSession);
   args.push("-m", spec.modelId);
   args.push(spec.message);
   return args;
+}
+
+/** --pure capability cache, keyed by resolved bin path, per process. */
+const pureSupportCache = new Map<string, boolean>();
+const PURE_PROBE_TIMEOUT_MS = 10_000;
+const PURE_PROBE_OUTPUT_CAP = 1_000_000;
+
+/** Decision helper — help text that lists `--pure` means the flag exists. */
+export function parsePureSupport(helpText: string): boolean {
+  return helpText.includes("--pure");
+}
+
+/**
+ * Probe `"<bin>" run --help` once per binary and cache the verdict. The
+ * decision reads TEXT, not the exit code — help printers vary in exit status.
+ * --pure is advertised-or-absent by evidence: any help text NOT listing it
+ * (including a bare exit with no output) means false. undefined is reserved
+ * for a probe that could not run at all (spawn error or timeout); it is NOT
+ * cached, and callers must fail closed — guessing the flag surface is what
+ * killed every lane role on OpenCode 2.x once.
+ */
+export async function probePureSupport(bin: string, timeoutMs = PURE_PROBE_TIMEOUT_MS): Promise<boolean | undefined> {
+  const cached = pureSupportCache.get(bin);
+  if (cached !== undefined) return cached;
+  return new Promise<boolean | undefined>((resolvePromise) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(bin, ["run", "--help"], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch {
+      resolvePromise(undefined);
+      return;
+    }
+    let out = "";
+    let settled = false;
+    const done = (value: boolean | undefined): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (value !== undefined) pureSupportCache.set(bin, value);
+      resolvePromise(value);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* already gone */
+      }
+      done(undefined);
+    }, timeoutMs);
+    const collect = (chunk: unknown): void => {
+      if (out.length <= PURE_PROBE_OUTPUT_CAP) out += String(chunk);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    child.on("error", () => done(undefined));
+    child.on("close", () => done(parsePureSupport(out)));
+  });
 }
 
 export type LaunchOutcome = {
@@ -399,10 +463,29 @@ export async function launchRole(cfg: LaneConfig, role: string, spec: LaunchSpec
   await writeFile(promptPath, spec.message, "utf8");
   await writeFile(transcriptPath, "", "utf8");
   await writeFile(stderrPath, "", "utf8");
-  const args = composeRunArgs(spec);
   const sandboxed = containment === "hardened";
   const keepDirs = cfg.sandboxWriteScope === "role" ? [paths.roleDir] : [cfg.runDir];
   const bin = resolveLaneBin(cfg.opencodeBin, process.env["PATH"] ?? "");
+  // Capability precheck BEFORE composing argv (PCB ticket 2026-11-12 addendum):
+  // OpenCode 2.x `run` does not know --pure; a blind flag would kill the role
+  // at birth. An unanswering probe fails closed — we refuse to guess.
+  const pureSupported = await probePureSupport(bin);
+  if (pureSupported === undefined) {
+    return {
+      ok: false,
+      rc: null,
+      signal: null,
+      timedOut: false,
+      paths,
+      transcriptPath,
+      sessionId: null,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      error: `PURE-SUPPORT-UNVERIFIABLE: "${bin} run --help" did not answer within ${String(PURE_PROBE_TIMEOUT_MS)}ms — refusing to guess the flag surface`,
+      sandboxed: false,
+    };
+  }
+  const args = composeRunArgs(spec, pureSupported);
   const spawnArgv = sandboxed
     ? composeSandboxArgs({ bwrapBin: bwrap, maskDirs: mask, keepDirs, bin, binChain: symlinkChain(bin), args })
     : [bin, ...args];
