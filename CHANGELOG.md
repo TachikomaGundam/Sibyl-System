@@ -18,6 +18,9 @@ Authoritative per-release detail lives in the release packets under `docs/releas
   (create→`session.create` with `location.directory`, model per prompt via
   `switchModel`, completion via `wait` + `context`, persona system via the
   `context` hook). See `docs/V2-MIGRATION.md`.
+- **README version binding.** Requirements sections now state the
+  2.x↔opencode-2.x binding (verified baseline 2.2.7) and name 1.6.5 as the
+  last 1.x-compatible line.
 - **Voter tool-gate enforcement point.** Disallowed voter/worker tools are
   refused at execution time (`ctx.tool.hook("execute.before")`) instead of
   being hidden from the per-prompt tool list — same law, stricter point.
