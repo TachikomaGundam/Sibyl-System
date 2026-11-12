@@ -37,6 +37,12 @@ Authoritative per-release detail lives in the release packets under `docs/releas
 - **Idle-failure visibility.** A session that reaches idle with no assistant
   message now reports the engine's idle outcome and provider error instead of
   a bare "no assistant message".
+- **Lane role launch capability probe.** OpenCode 2.x `run` has no `--pure`
+  flag and roles composed with it died at birth (PCB lane ticket 20261108
+  addendum). `launchRole` probes `"<bin>" run --help` once per binary and
+  composes `--pure` only when advertised; an unanswering probe fails closed
+  (`PURE-SUPPORT-UNVERIFIABLE`). Isolation unchanged; V1-era bins get
+  byte-identical argv.
 
 ### Added
 - Carried release-law changes first shipped without a changelog entry are now
