@@ -27,6 +27,7 @@ import { parseVerdict } from "../verdict/index.ts";
 import { PERSONAS, repairDemand } from "../personas.ts";
 import type { RunRecord } from "../state/index.ts";
 import { internalError, readArtifact, runInSession, slotForModel } from "./shared.ts";
+import { reclaimRunSessions, trackingClient } from "./reclaim.ts";
 import { errMessage } from "../util.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
@@ -192,9 +193,15 @@ export async function consultExecute(
     goal: args.goal,
   });
 
+  // H1 anti-bloat registration (I2 REGISTERED-ONLY): every session created
+  // inside this call is captured here; the convener row predates the call and
+  // therefore can never enter this set (audit-convener retention unaffected).
+  const created = new Set<string>();
+  const runDeps: ToolDeps = { ...deps, client: trackingClient(deps.client, created) };
+
   const outcomes = await Promise.all(
     COUNCILORS.map((id): Promise<VoterOutcome> =>
-      castVote({ deps, directory: context.directory, spaceDir: record.spaceDir, goal: args.goal, artifactText: read.text, id, parentID: context.sessionID }),
+      castVote({ deps: runDeps, directory: context.directory, spaceDir: record.spaceDir, goal: args.goal, artifactText: read.text, id, parentID: context.sessionID }),
     ),
   );
 
@@ -247,6 +254,34 @@ export async function consultExecute(
   };
   await deps.store.appendOrUpdate(finalRecord);
 
+  // H1 anti-bloat (council sibyl-20261114T101952Z-d820): delete the voter
+  // sessions whose evidence (reply file + TERMINALS row) is on disk. The
+  // verdict above already stands; failed deletes dead-letter and never flip it.
+  const reclaim = await reclaimRunSessions({
+    client: deps.client,
+    directory: context.directory,
+    spaceDir: record.spaceDir,
+    retainSessions: deps.options.retainSessions,
+    entries: [...created].map((sessionId) => ({
+      sessionId,
+      artifactPaths: [terminalsPath, ...outcomes.filter((o) => o.sessionId === sessionId).map((o) => o.replyPath)],
+    })),
+    evidencePaths: [terminalsPath, ...outcomes.map((o) => o.replyPath)],
+  });
+  if (reclaim.ran || reclaim.retainSessions) {
+    await deps.store.appendOrUpdate({
+      ...finalRecord,
+      reclaim: {
+        ran: reclaim.ran,
+        ...(reclaim.reason !== undefined ? { reason: reclaim.reason } : {}),
+        retainSessions: reclaim.retainSessions,
+        deleted: reclaim.deleted.length,
+        skipped: reclaim.skipped.length,
+        failed: reclaim.failed.length,
+      },
+    });
+  }
+
   const lines: string[] = [
     `SIBYL CONSULT: ${effectiveVerdict} (${deadFaceCount(dead)} votes ${String(tally.approvals)}A/${String(tally.rejects)}R/${String(tally.errors)}E/${String(tally.missing)}M) run ${record.runId}`,
     `  ${independenceLabel(independence)}`,
@@ -254,6 +289,7 @@ export async function consultExecute(
     ...tally.must_fix.map((m) => `  must_fix: ${m}`),
     ...outcomes.map((o) => `  reply: ${o.id} -> ${o.replyPath}`),
     `  ${rulesLabel(finalRecord.instrument ?? instrumentFace())} components=${String(Object.keys(instrumentFace().components).length)}`,
+    `  reclaim: ${reclaim.retainSessions ? "retained (retainSessions=true)" : `deleted=${String(reclaim.deleted.length)} skipped=${String(reclaim.skipped.length)} failed=${String(reclaim.failed.length)}`}`,
     `  store: ${deps.store.runsFile}`,
   ];
   return lines.join("\n");

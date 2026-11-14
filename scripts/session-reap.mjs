@@ -26,12 +26,32 @@
 // smoke sessions appear in session_v2 only). Enumeration and deletion both
 // moved accordingly; legacy-table cleanup is deliberately OUT of scope here.
 //
+// H2 frozen-manifest mode (2026-11-14, council
+// sibyl-20261114T101952Z-d820 must_fix 4/8/12). A dry run writes a manifest;
+// if the store changes between adjudication and execution, re-enumerating at
+// apply time can drift the delete set (rows age in, rows disappear). --manifest
+// freezes the ADJUDICATED ids instead:
+//   node scripts/session-reap.mjs --manifest=<path> [--apply] [gates...]
+//  - ONLY the time-based recomputation is skipped. Every other gate revalidates
+//    per row against the live store and FAIL-CLOSES the batch:
+//      * title must still be in the Sibyl family ('sibyl:' prefix);
+//      * an audit-root row still requires --owner-ruling;
+//      * --keep still wins.
+//  - a manifest id already absent from the store is recorded 'absent' (idempotent
+//    re-run of a partially applied sweep), not an error.
+//  - manifest rows are deleted CHILD-FIRST (children resolved from the live
+//    parent_id graph), so an explicit parent never precedes its children.
+//  - input accepts either our own manifest rows (action:"delete") or a
+//    DEAD-LETTER.jsonl row set ({sessionId,reason}) from src/tools/reclaim.ts —
+//    the named crash/retry recovery path for ids that were registered but never
+//    deleted (must_fix 12).
+//
 // Usage: node scripts/session-reap.mjs [--apply] [--tier-a-days=7]
-//        [--db=<path>] [--manifest-dir=<path>]
+//        [--db=<path>] [--manifest-dir=<path>] [--manifest=<path>]
 //        [--tier-b-days=N --owner-ruling] [--keep=<regex>]
 
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -101,6 +121,53 @@ export function deleteSession(bin, id, timeoutMs = 60_000) {
   });
 }
 
+/** Frozen-manifest input (H2): accepts our own manifest rows ({action:"delete",
+ * id}) and reclaim DEAD-LETTER rows ({sessionId}). Returns ordered unique
+ * [{id, source}]. Throws on unparseable JSON — a corrupt ledger is refused,
+ * never half-trusted. */
+export function readDeleteSet(path, readText = null) {
+  const text = readText ?? readFileSync(path, "utf8");
+  const out = [];
+  const seen = new Set();
+  let lineNo = 0;
+  for (const line of text.split("\n")) {
+    lineNo += 1;
+    if (line.trim() === "") continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch {
+      throw new Error(`manifest line ${lineNo} is not valid JSON`);
+    }
+    const id = row && typeof row === "object"
+      ? (row.action === "delete" && typeof row.id === "string" ? row.id : typeof row.sessionId === "string" ? row.sessionId : null)
+      : null;
+    if (id === null || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, source: typeof row.sessionId === "string" ? "dead-letter" : "manifest" });
+  }
+  return out;
+}
+
+/** Child-first ordering (H2 must_fix 1 / schema fact: parent_id has no FK
+ * cascade): deeper descendants sort before their in-set ancestors. Cycles (not
+ * producible by the engine) degrade to input order via the depth guard. */
+export function orderChildFirst(ids, parentById) {
+  const set = new Set(ids);
+  const depthOf = (id) => {
+    let d = 0;
+    let p = parentById.get(id) ?? null;
+    const guard = new Set([id]);
+    while (p !== null && set.has(p) && !guard.has(p) && d < 64) {
+      guard.add(p);
+      p = parentById.get(p) ?? null;
+      d += 1;
+    }
+    return d;
+  };
+  return [...ids].sort((a, b) => depthOf(b) - depthOf(a));
+}
+
 const args = Object.fromEntries(process.argv.slice(2).map((a) => {
   const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
   return m ? [m[1], m[2] ?? true] : [a, true];
@@ -113,6 +180,59 @@ async function main() {
   mkdirSync(manifestDir, { recursive: true });
   const manifest = join(manifestDir, "manifest.jsonl");
   const log = (o) => appendFileSync(manifest, JSON.stringify(o) + "\n");
+  const ownerRuling = Boolean(args["owner-ruling"]);
+  const keepRe = args.keep ? new RegExp(String(args.keep)) : null;
+
+  // ---- H2 frozen-manifest mode: the adjudicated set, not a re-computation ----
+  if (args.manifest) {
+    const entries = readDeleteSet(String(args.manifest));
+    const now = enumerate(dbPath);
+    const byId = new Map(now.map((s) => [s.id, s]));
+    const parentById = new Map(now.map((s) => [s.id, s.parentID]));
+    const live = [];
+    let absent = 0;
+    for (const e of entries) {
+      const s = byId.get(e.id);
+      if (s === undefined) {
+        absent += 1;
+        log({ id: e.id, action: "absent", reason: "not in store (idempotent re-apply)", source: e.source });
+        continue;
+      }
+      const title = s.title ?? "";
+      if (!title.toLowerCase().startsWith("sibyl:")) {
+        throw new Error(`manifest gate: ${e.id} title "${title}" is outside the Sibyl family — batch refused`);
+      }
+      if (keepRe !== null && keepRe.test(e.id)) {
+        log({ id: e.id, action: "keep", reason: "--keep override", title });
+        continue;
+      }
+      if (title.toLowerCase().startsWith("sibyl:audit") && !ownerRuling) {
+        throw new Error(`manifest gate: ${e.id} is an audit root — tier B needs --owner-ruling (owner's call)`);
+      }
+      live.push(e.id);
+    }
+    const ordered = orderChildFirst(live, parentById);
+    console.log(`manifest mode: rows=${entries.length} to-delete=${live.length} absent=${absent} (receipt=${manifest})`);
+    if (!args.apply) {
+      console.log("DRY-RUN (no deletion). Add --apply to execute the frozen set.");
+      return;
+    }
+    let ok = 0;
+    let failed = 0;
+    for (const id of ordered) {
+      if (await deleteSession(bin, id)) {
+        ok += 1;
+        log({ id, action: "deleted", channel: "opencode session delete", order: "child-first" });
+      } else {
+        failed += 1;
+        log({ id, action: "delete-failed", channel: "opencode session delete" });
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    console.log(`manifest reap ok=${ok} failed=${failed}; session_v2 rows after=${enumerate(dbPath).length}`);
+    if (failed > 0) process.exitCode = 1;
+    return;
+  }
 
   const sessions = enumerate(dbPath);
   const actions = classify(sessions, {
@@ -128,9 +248,15 @@ async function main() {
   if (!args.apply) { console.log("DRY-RUN (no deletion). Add --apply to execute."); return; }
   if (args["tier-b-days"] !== undefined && !args["owner-ruling"]) throw new Error("tier B requested without --owner-ruling: retention law change is the owner's call");
 
+  // child-first deletion order (schema fact: parent_id has no FK cascade — an
+  // explicit parent row must never be removed before its children)
+  const parentById = new Map(sessions.map((s) => [s.id, s.parentID]));
+  const delById = new Map(del.map((a) => [a.id, a]));
+  const ordered = orderChildFirst(del.map((a) => a.id), parentById).map((id) => delById.get(id));
+
   let ok = 0;
   let failed = 0;
-  for (const a of del) {
+  for (const a of ordered) {
     if (await deleteSession(bin, a.id)) ok += 1;
     else { failed += 1; log({ id: a.id, action: "delete-failed", channel: "opencode session delete" }); }
     await new Promise((r) => setTimeout(r, 50));
