@@ -36,7 +36,7 @@ export function buildStatusTool(deps: ToolDeps) {
  * the record; the SESSIONS.json ledger is the ledger. A missing ledger means
  * the run predates the wheel — say that plainly instead of failing. */
 function reclaimFace(deps: ToolDeps, runId: string): string {
-  const space = join(deps.store.runsFile.replace(/[/\\]runs\.json$/, ""), "spaces", runId);
+  const space = join(dirname(deps.store.runsFile), "spaces", runId);
   let ledger: string[];
   try {
     ledger = readFileSync(join(space, "SESSIONS.json"), "utf8").split("\n").filter((l) => l.trim() !== "");
