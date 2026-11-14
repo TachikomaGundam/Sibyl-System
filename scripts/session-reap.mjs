@@ -173,6 +173,11 @@ const args = Object.fromEntries(process.argv.slice(2).map((a) => {
   return m ? [m[1], m[2] ?? true] : [a, true];
 }));
 
+// --dry-manifest: classify-only pass — frozen manifest + summary are written,
+// NOTHING is deleted, and main() stops right after the manifest (no re-run of
+// classification at a later instant). Front-end for frozen-set sweeps.
+const DRY_MANIFEST = args["dry-manifest"] === true;
+
 async function main() {
   const bin = process.env["OPENCODE_BIN"] ?? join(homedir(), ".local", "bin", "opencode");
   const dbPath = args.db ?? join(homedir(), ".local", "share", "opencode", "opencode.db");
@@ -211,8 +216,39 @@ async function main() {
       }
       live.push(e.id);
     }
+    // ORPHAN GUARD (2026-11-14 backlog audit): deleting a row whose PARENT is a
+    // live store row outside the delete set strands the engine-cascaded child
+    // chain. Refused unless --allow-orphans names the parent's fate same-set.
+    // --promote-orphans: a delete whose parent is absent is the ROOT of its
+    // family; its engine cascade removes the whole subtree. Keep those, drop
+    // children whose parent would remain live (the orphan-refused rule).
+    if (args["promote-orphans"]) {
+      const absentNow = new Set(entries.filter((e) => !live.includes(e.id)).map((e) => e.id));
+      const roots = new Set(live.filter((id) => {
+        const pid = parentById.get(id);
+        return pid == null || !now.has(pid) || absentNow.has(pid);
+      }));
+      const dropped = live.filter((id) => !roots.has(id));
+      for (const id of dropped) log({ id, action: "orphan-refused", parent: parentById.get(id), reason: "parent live and outside the delete set (--promote-orphans keeps cascade roots only)" });
+      live.length = 0;
+      live.push(...roots);
+    }
+    const allById = new Map(now.map((s) => [s.id, s]));
+    const delSet = new Set(live);
+    const allowOrphans = Boolean(args["allow-orphans"]);
+    const kept = [];
+    for (const id of live) {
+      const pid = parentById.get(id);
+      if (pid != null && allById.has(pid) && !delSet.has(pid)) {
+        if (allowOrphans) kept.push(id);
+        else log({ id, action: "orphan-refused", parent: pid, reason: "parent row is live and outside the delete set" });
+      } else kept.push(id);
+    }
+    live.length = 0;
+    live.push(...kept);
+    const orphanRefused = entries.length - live.length - absent;
     const ordered = orderChildFirst(live, parentById);
-    console.log(`manifest mode: rows=${entries.length} to-delete=${live.length} absent=${absent} (receipt=${manifest})`);
+    console.log(`manifest mode: rows=${entries.length} to-delete=${live.length} absent=${absent} orphan-refused=${orphanRefused} (receipt=${manifest})`);
     if (!args.apply) {
       console.log("DRY-RUN (no deletion). Add --apply to execute the frozen set.");
       return;
@@ -244,6 +280,14 @@ async function main() {
   });
   const del = actions.filter((a) => a.action === "delete");
   for (const a of actions) log(a);
+  if (DRY_MANIFEST) {
+    const parents = new Set(sessions.map((s) => s.parentID).filter(Boolean));
+    const orphans = del.filter((a) => !parents.has(a.id)).map((a) => a.id);
+    for (const id of orphans) log({ id, action: "orphan-refused", reason: "parent row outside the sibyl delete set — deleting would orphan it; a ruling must name the parent too" });
+    console.log(`DRY-MANIFEST: delete=${del.length - orphans.length} orphans-not-deletable=${orphans.length} keep=${actions.length - del.length} (receipt=${manifest})`);
+    console.log("No deletion performed. Apply with: --manifest=<receipt> [--owner-ruling] [--allow-orphans] --apply");
+    return;
+  }
   console.log(`candidates: delete=${del.length} keep=${actions.length - del.length} (manifest=${manifest})`);
   if (!args.apply) { console.log("DRY-RUN (no deletion). Add --apply to execute."); return; }
   if (args["tier-b-days"] !== undefined && !args["owner-ruling"]) throw new Error("tier B requested without --owner-ruling: retention law change is the owner's call");
