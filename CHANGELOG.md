@@ -5,6 +5,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 Authoritative per-release detail lives in the release packets under `docs/release/` (this file summarizes; the packets and the tag anchors are the single source).
 
+## [2.1.0] — 2026-11-16 (anti-bloat wheel)
+
+### Added
+- **Run-session reclaim (council H approve group, `sibyl-20261114T101952Z-d820`).**
+  Every council/consult close deletes the persona/child sessions the run itself
+  created, through the engine's own `session.delete` domain (no direct store
+  writes; engine owns cascade). Receipt in tool output, run record, and run
+  ledger; LIFO order; the parent conversation is never in the delete set;
+  `retainSessions` option opts out. Live-proven under opencode 2.2.7:
+  council run `sibyl-20261116T062954Z-4fb9` closed with `deleted=3 failed=0`,
+  store retaining only the convener row.
+- **`scripts/run-progress.mjs`** — read-only in-flight observability for
+  council runs: status, per-voter ballot files, elapsed time; surfaces stale
+  `running` ledger records as data (no writes).
+- **`session-reap` frozen-set safety mode** — `--dry-manifest` (classify once,
+  no silent recompute between dry-run and apply), orphan guard,
+  `--promote-orphans` cascade-root mode; closes the P1-sweep deviation class
+  (dry/apply drift measured at 87 seconds, 1 row).
+- **`scripts/gc-run-dirs.mjs`** — stale `/tmp/sibyl-run-*` janitor with
+  symlink guard; default dry-run, `--apply` moves to archive.
+
+### Changed
+- Run-space files (`SESSIONS.json`, `STATUS.md`, `TERMINALS.log`) are written
+  inside the run space directory; v1 absolute paths still read (fallback), so
+  cross-repo consumers are unaffected.
+- `sweep --archive` writes to the persistent store with ledger sync
+  (default remains delete).
+- `sibyl_status <runId>` shows the run's reclaim line.
+- Operator evidence journal moved out of the tracked tree per
+  `docs/release/TEMPLATE.md` ("this ledger is deliberately operator-local");
+  residual named in the v2.1.0 release packet.
+
+### Fixed
+- Publish gate: `workflow_dispatch` republish path reads pinned files
+  (v2.0.0 stranding cure); H1 causal tie fed by wall-clock step;
+  release-lease check accepts both documented version forms.
+
+### Notes
+- Version bump to 2.1.0 is also load-bearing for opencode plugin resolution:
+  the engine keys its plugin cache by `name@version`; a distinct version is
+  what forces a fresh copy instead of a stale cached 2.0.0.
+
 ## [2.0.0] — 2026-11-12 (opencode 2.x migration)
 
 ### Changed
