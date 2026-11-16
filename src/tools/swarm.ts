@@ -31,6 +31,7 @@ import { planWorkflow } from "../swarm/planner.ts";
 import type { SwarmReport, SwarmVerdict } from "../swarm/types.ts";
 import type { RunRecord } from "../state/index.ts";
 import { buildRepairDemand } from "./consult.ts";
+import { reclaimRunSessions, trackingClient } from "./reclaim.ts";
 import { internalError, readArtifact, slotForModel } from "./shared.ts";
 import type { ToolContextLike, ToolDeps } from "./shared.ts";
 
@@ -114,11 +115,17 @@ export async function swarmExecute(
   const independence = await assessIndependence(client, directory, context.sessionID, read);
   const { record } = await store.createRun({ kind: "swarm", artifact: read.source, goal: args.goal });
 
+  // H1 anti-bloat registration (I2 REGISTERED-ONLY): every session created
+  // inside this call (architect + repairs, workers, judge) is captured; the
+  // convener row predates the call and can never enter this set.
+  const created = new Set<string>();
+  const runClient = trackingClient(client, created);
+
   // --- PLAN: architect session; repair starts a FRESH architect session
   // (planWorkflow's repair seam carries no sessionID of its own).
   const architectModel = slotForModel(options.modelPool, undefined, PERSONAS.ARCHITECT.modelSlot);
   const plan = await planWorkflow({
-    client,
+    client: runClient,
     directory,
     architectPersona: { system: PERSONAS.ARCHITECT.system },
     model: architectModel,
@@ -128,7 +135,7 @@ export async function swarmExecute(
     parentID: context.sessionID,
     repair: async (_badText, why) => {
       const redo = await runPersona({
-        client,
+        client: runClient,
         directory,
         persona: { system: PERSONAS.ARCHITECT.system },
         model: architectModel,
@@ -156,7 +163,7 @@ export async function swarmExecute(
   // --- DISPATCH: schema-concurrency capped by options.concurrencyK; full
   // worker drafts land as <workerId>.draft.md inside the run's spaceDir.
   const dispatch = await dispatchRoster(mint.roster, {
-    client,
+    client: runClient,
     directory,
     parentID: context.sessionID,
     concurrencyK: Math.min(options.concurrencyK, plan.schema.concurrency),
@@ -182,7 +189,7 @@ export async function swarmExecute(
   let judgeNote = "judge=off";
   if (args.judge === true) {
     const judged = await runPersona({
-      client,
+      client: runClient,
       directory,
       persona: { system: SWARM_JUDGE_SYSTEM },
       model: slotForModel(options.modelPool, options.swarm.judge, undefined),
@@ -198,6 +205,18 @@ export async function swarmExecute(
     if (word !== null) report = { ...report, verdict: word };
   }
 
+  // H1 anti-bloat (council d820): delete the sessions this run created, AFTER
+  // TERMINALS.txt + drafts are on disk (they are — dispatch/aggregate
+  // completed above). Failed runs never reach here: their sessions are kept
+  // for salvage and age into the ordinary reap tiers.
+  const reclaim = await reclaimRunSessions({
+    client,
+    directory,
+    spaceDir: record.spaceDir,
+    retainSessions: options.retainSessions,
+    entries: [...created].map((sessionId) => ({ sessionId, artifactPaths: [join(record.spaceDir, "TERMINALS.txt")] })),
+    evidencePaths: [join(record.spaceDir, "TERMINALS.txt"), ...report.artifacts],
+  });
   const counts = countTasks(report.tasks);
   // Ballot honesty (the 20260929 miscount class, swarm-side twin of the
   // consult.ts "absence is not a REJECT vote" rule): engine-failed tasks cast
@@ -219,6 +238,14 @@ export async function swarmExecute(
     rounds: report.rounds,
     instrument: instrumentFace(),
     independence,
+    reclaim: {
+      ran: reclaim.ran,
+      ...(reclaim.reason !== undefined ? { reason: reclaim.reason } : {}),
+      retainSessions: reclaim.retainSessions,
+      deleted: reclaim.deleted.length,
+      skipped: reclaim.skipped.length,
+      failed: reclaim.failed.length,
+    },
     verdict: {
       verdict: tag,
       approvals: counts.done,
@@ -238,6 +265,7 @@ export async function swarmExecute(
     ...report.artifacts.map((a) => `  artifact: ${a}`),
     `  ${rulesLabel(instrumentFace())} components=${String(Object.keys(instrumentFace().components).length)}`,
     `  space: ${record.spaceDir}`,
+    `  reclaim: ${reclaim.retainSessions ? "retained (retainSessions=true)" : `deleted=${String(reclaim.deleted.length)} skipped=${String(reclaim.skipped.length)} failed=${String(reclaim.failed.length)}`}`,
     `  store: ${store.runsFile}`,
   ];
   return lines.join("\n");

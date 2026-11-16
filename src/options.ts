@@ -157,6 +157,11 @@ export const pluginOptionsSchema = z
   concurrencyK: z.number().int().min(1).max(8).default(4),
   /** launch stagger between parallel persona calls, ms; integer >= 0 */
   staggerMs: z.number().int().min(0).default(2000),
+  /** H1 anti-bloat (council sibyl-20261114T101952Z-d820): true = keep the
+   * engine sessions a done run created; the run then records
+   * reclaim:{ran:false, reason:"retainSessions"} and its rows age into the
+   * ordinary reap tiers instead. Default false = evidence-first reclaim. */
+  retainSessions: z.boolean().default(false),
   /** slot-name -> model pool; "default" entry is mandatory. prefault (not
    * default) so every parse returns a FRESH pool - zod's .default() hands back
    * the same shared object reference and a caller mutation would poison all

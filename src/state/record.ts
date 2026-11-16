@@ -94,6 +94,29 @@ export function rebuildInstrument(v: InstrumentRef): InstrumentRef {
  * operator trail); a missing/invalid `updatedAt` is repaired to `createdAt`
  * on load instead of dropping the entry.
  */
+/** H1 anti-bloat wheel (council sibyl-20261114T101952Z-d820): summary of the
+ * done-run engine-session reclaim. The detailed ledger lives in the run's
+ * spaceDir (SESSIONS.json + DEAD-LETTER.jsonl, written by src/tools/reclaim.ts
+ * before any delete). retainSessions=true records the deliberate retention
+ * (ballot H must_fix 3): a retained run stays auditable on the record face. */
+export type SessionReclaimSummary = {
+  ran: boolean;
+  reason?: string;
+  retainSessions?: boolean;
+  deleted: number;
+  skipped: number;
+  failed: number;
+};
+
+export function isReclaimSummary(v: unknown): v is SessionReclaimSummary {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o["ran"] !== "boolean") return false;
+  if (typeof o["deleted"] !== "number" || typeof o["skipped"] !== "number" || typeof o["failed"] !== "number") return false;
+  if (o["reason"] !== undefined && typeof o["reason"] !== "string") return false;
+  return o["retainSessions"] === undefined || typeof o["retainSessions"] === "boolean";
+}
+
 export type RunRecord = {
   runId: string;
   kind: RunKind;
@@ -108,6 +131,7 @@ export type RunRecord = {
   notes?: string;
   instrument?: InstrumentRef;
   independence?: IndependenceRef;
+  reclaim?: SessionReclaimSummary;
 };
 
 /** Rename implementation seam (tests inject a flaky rename to exercise the
@@ -240,6 +264,20 @@ export function validateEntry(raw: unknown): EntryVerdict {
       return { ok: false, reason: "independence must be {status: INDEPENDENT|NOT-INDEPENDENT|UNVERIFIABLE, convenerChain: string[], evidence: string} when present" };
     }
     record.independence = rebuildIndependence(independence);
+  }
+  const reclaim = field(raw, "reclaim");
+  if (reclaim !== undefined) {
+    if (!isReclaimSummary(reclaim)) {
+      return { ok: false, reason: "reclaim must be {ran, deleted, skipped, failed, reason?, retainSessions?} when present" };
+    }
+    record.reclaim = {
+      ran: reclaim.ran,
+      deleted: reclaim.deleted,
+      skipped: reclaim.skipped,
+      failed: reclaim.failed,
+      ...(reclaim.reason !== undefined ? { reason: reclaim.reason } : {}),
+      ...(reclaim.retainSessions !== undefined ? { retainSessions: reclaim.retainSessions } : {}),
+    };
   }
   return { ok: true, record };
 }
